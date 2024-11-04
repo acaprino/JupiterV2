@@ -1,0 +1,38 @@
+{
+  "enabled": true,
+  "mt5": {
+    "timeout": 10000,
+    "account": 22007382,
+    "password": ".7mnnH6v-uaB",
+    "server": "FOREX.comGlobal-Demo 531",
+    "mt5_path": "C:/Program Files/MetaTrader 5/terminal64.exe"
+  },
+  "live": {
+    "symbol": "EURUSD",
+    "timeframe": "H1",
+    "trading_direction": "LONG"
+  },
+  "bot": {
+    "version": 1.0,
+    "name": "EURUSD_LONG_M5",
+    "mode": "LIVE",
+    "magic_number": 70943,
+    "symbols_db_sheet_id": "1sVwbbDDXzx7JtP2LY3ghxL6StYNOlTK8nz0qMD7mEhY",
+    "logging_level": "DEBUG"
+  },
+  "backtesting": {
+    "configs": [],
+    "gdrive": {
+      "sync_enabled": true,
+      "parent_folder_id": "1wCLi_uVh_wPCwxfbTK37rO-ZogzRZUyL"
+    }
+  },
+  "telegram": {
+    "token": "7472156865:AAGwCB5MMlRNN4Bd59o_ZwpK1pHDFRFUVhc",
+    "chat_ids": [
+      "98954367"
+    ],
+    "active": true,
+    "notification_level": "debug"
+  }
+}

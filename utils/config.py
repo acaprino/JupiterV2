@@ -1,0 +1,165 @@
+import json
+from utils.enums import BotMode, TradingDirection, Timeframe, NotificationLevel
+from utils.utils import string_to_enum
+
+
+class ConfigReader:
+    # Class attributes
+    metatrader5_config = None
+    live_config = None
+    bot_config = None
+    telegram_config = None
+    mongo_config = None
+    _instance = None  # Singleton instance
+
+    def __new__(cls, config_file_param: str = None):
+        # Singleton pattern to ensure only one instance is created
+        if cls._instance is None:
+            # Corrected line: Only pass `cls` to `__new__`
+            cls._instance = super(ConfigReader, cls).__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self, config_file_param: str = None):
+        # Prevent reinitialization
+        if not self._initialized:
+            self.config = None
+            self._initialized = True
+            if config_file_param:
+                self.load_config(config_file_param)
+
+    def load_config(self, filepath):
+        """
+        Loads the configuration from a file.
+
+        Parameters:
+        - filepath: Path to the configuration file.
+        """
+
+        # Load the configuration from the file
+        with open(filepath, 'r') as file:
+            self.config = json.load(file)
+        # Initialize other configurations
+        self._initialize_config()
+
+    def _initialize_config(self):
+        """
+        Initializes various configuration sections from the loaded JSON data.
+        Converts certain string values to their corresponding enum types.
+        """
+        # Initializes MetaTrader5 config
+        self.metatrader5_config = self.config.get("mt5", {})
+
+        # Initializes Live config
+        live_config = self.config.get("live", {})
+        if 'timeframe' in live_config:
+            live_config['timeframe'] = string_to_enum(Timeframe, live_config['timeframe'])
+        if 'trading_direction' in live_config:
+            live_config['trading_direction'] = string_to_enum(TradingDirection, live_config['trading_direction'])
+        self.live_config = live_config
+
+        # Initializes Bot config
+        bot_config = self.config.get("bot", {})
+        if 'mode' in bot_config and bot_config['mode']:
+            bot_config['mode'] = string_to_enum(BotMode, bot_config['mode'])
+        self.bot_config = bot_config
+
+        # Initializes Telegram config
+        telegram_config = self.config.get("telegram", {})
+        if 'notification_level' in telegram_config and telegram_config['notification_level']:
+            telegram_config['notification_level'] = string_to_enum(NotificationLevel, telegram_config['notification_level'])
+        self.telegram_config = telegram_config
+
+        # Initializes MongoDB config
+        mongo_config = self.config.get("mongo", {})
+        self.mongo_config = mongo_config
+
+    # Getter methods
+
+    def get_metatrader5_config(self):
+        if self.config is None:
+            raise ValueError("Configuration not loaded. Call load_config(filepath) first.")
+        return self.metatrader5_config
+
+    def get_config(self):
+        if self.config is None:
+            raise ValueError("Configuration not loaded. Call load_config(filepath) first.")
+        return self.live_config
+
+    def get_bot_config(self):
+        if self.config is None:
+            raise ValueError("Configuration not loaded. Call load_config(filepath) first.")
+        return self.bot_config
+
+    def get_telegram_config(self):
+        if self.config is None:
+            raise ValueError("Configuration not loaded. Call load_config(filepath) first.")
+        return self.telegram_config
+
+    def get_mongo_config(self):
+        if self.config is None:
+            raise ValueError("Configuration not loaded. Call load_config(filepath) first.")
+        return self.mongo_config
+
+    def get_mt5_timeout(self):
+        return self.get_metatrader5_config().get("timeout")
+
+    def get_mt5_account(self):
+        return self.get_metatrader5_config().get("account")
+
+    def get_mt5_password(self):
+        return self.get_metatrader5_config().get("password")
+
+    def get_mt5_server(self):
+        return self.get_metatrader5_config().get("server")
+
+    def get_mt5_path(self):
+        return self.get_metatrader5_config().get("mt5_path")
+
+    def get_symbol(self):
+        return self.get_config().get("symbol")
+
+    def get_timeframe(self) -> Timeframe:
+        return self.get_config().get("timeframe")
+
+    def get_trading_direction(self) -> TradingDirection:
+        return self.get_config().get("trading_direction")
+
+    def get_bot_version(self):
+        return self.get_bot_config().get("version")
+
+    def get_bot_name(self):
+        return self.get_bot_config().get("name")
+
+    def get_bot_mode(self) -> BotMode:
+        return self.get_bot_config().get("mode")
+
+    def get_bot_magic_number(self):
+        return self.get_bot_config().get("magic_number")
+
+    def get_bot_logging_level(self):
+        return self.get_bot_config().get("logging_level")
+
+    def get_bot_symbols_db_sheet_id(self):
+        return self.get_bot_config().get("symbols_db_sheet_id")
+
+    def get_telegram_token(self):
+        return self.get_telegram_config().get("token")
+
+    def get_telegram_chat_ids(self):
+        return self.get_telegram_config().get("chat_ids")
+
+    def get_telegram_active(self):
+        return self.get_telegram_config().get("active")
+
+    def get_telegram_notification_level(self) -> NotificationLevel:
+        return self.get_telegram_config().get("notification_level")
+
+    def get_mongo_host(self):
+        return self.get_mongo_config().get("host")
+
+    def get_mongo_port(self) -> int:
+        return int(self.get_mongo_config().get("port"))
+
+    def get_mongo_db_name(self) -> str:
+        return self.get_mongo_config().get("db_name")
