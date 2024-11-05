@@ -12,6 +12,7 @@ from strategies.adrastea import Adrastea
 from brokers.mt5_broker import MT5Broker
 from utils.config import ConfigReader
 from utils.logger import log_init, log_info
+from utils.telegram_lib import TelegramBotWrapper
 
 
 async def main(config_file_param: str):

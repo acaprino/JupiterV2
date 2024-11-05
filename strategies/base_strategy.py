@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 import asyncio
 from typing import Dict, Optional
 
+from datao import TradeOrder
+
 
 class TradingStrategy(ABC):
     """

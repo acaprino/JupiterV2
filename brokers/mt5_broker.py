@@ -246,3 +246,21 @@ class MT5Broker(BrokerAPI):
 
     def get_working_directory(self):
         return mt5.terminal_info().data_path + "\\MQL5\\Files"
+
+    def get_account_balance(self) -> float:
+        account_info = mt5.account_info()
+
+        if account_info is None:
+            raise Exception("Failed to retrieve account information")
+
+        log_info(f"Account balance: {account_info.balance}")
+        return account_info.balance
+
+    def get_account_leverage(self) -> float:
+        account_info = mt5.account_info()
+
+        if account_info is None:
+            raise Exception("Failed to retrieve account information")
+
+        log_info(f"Account leverage: {account_info.leverage}")
+        return account_info.leverage

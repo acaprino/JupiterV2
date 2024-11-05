@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from pandas import Series
 
 from datao import SymbolInfo, TradeOrder, SymbolPrice
+from datao.RequestResult import RequestResult
 
 
 class BrokerAPI(ABC):
@@ -16,7 +17,7 @@ class BrokerAPI(ABC):
         pass
 
     @abstractmethod
-    def place_order(self, request: TradeOrder):
+    def place_order(self, request: TradeOrder) -> RequestResult:
         pass
 
     @abstractmethod
@@ -43,3 +44,10 @@ class BrokerAPI(ABC):
     def shutdown(self):
         pass
 
+    @abstractmethod
+    def get_account_balance(self) -> float:
+        pass
+
+    @abstractmethod
+    def get_account_leverage(self) -> float:
+        pass

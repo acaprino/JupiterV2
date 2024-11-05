@@ -7,6 +7,7 @@ import pandas as pd
 from pandas import Series
 
 from csv_loggers.candles_logger import CandlesLogger
+from datao import TradeOrder
 from datao.SymbolInfo import SymbolInfo
 from providers.candle_provider import CandleProvider
 from providers.market_state_notifier import MarketStateNotifier
@@ -14,12 +15,17 @@ from strategies.base_strategy import TradingStrategy
 from strategies.indicators import supertrend, stochastic, average_true_range
 from utils.async_executor import execute_broker_call
 from utils.config import ConfigReader
-from utils.enums import Indicators, Timeframe, TradingDirection
+from utils.enums import Indicators, Timeframe, TradingDirection, OpType, NotificationLevel
 from utils.error_handler import exception_handler
 from brokers.broker_interface import BrokerAPI
 
-from utils.logger import log_info, log_error, log_debug
-from utils.utils import describe_candle
+from utils.logger import log_info, log_error, log_debug, log_warning
+from utils.mongo_db import MongoDB
+from utils.telegram_lib import TelegramBotWrapper
+from utils.utils import describe_candle, now_utc, round_to_step, round_to_point
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import ContextTypes
 
 leverages = {
     "FOREX": [10, 30, 100],
@@ -70,6 +76,11 @@ class Adrastea(TradingStrategy):
         self.prev_state = None
         self.cur_state = None
         self.should_enter = False
+        self.heikin_ashi_candles_buffer = int(1000 * config.get_timeframe().to_hours())
+        self.telegram = TelegramBotWrapper(config.get_telegram_token())
+
+        self.telegram.start()
+        self.telegram.add_command_callback_handler(self.signal_confirmation_handler)
 
     @exception_handler
     async def bootstrap(self):
@@ -83,15 +94,13 @@ class Adrastea(TradingStrategy):
             symbol = self.config.get_symbol()
             trading_direction = self.config.get_trading_direction()
 
-            heikin_ashi_candles_buffer = int(1000 * timeframe.to_hours())
             bootstrap_rates_count = int(500 * (1 / timeframe.to_hours()))
-            tot_candles_count = heikin_ashi_candles_buffer + bootstrap_rates_count + self.get_minimum_frames_count()
+            tot_candles_count = self.heikin_ashi_candles_buffer + bootstrap_rates_count + self.get_minimum_frames_count()
 
             try:
 
                 bootstrap_candles_logger = CandlesLogger(symbol, timeframe, trading_direction, custom_name='bootstrap')
 
-                # Recupera le ultime 100 candele storiche
                 candles = await execute_broker_call(
                     self.broker.get_last_candles,
                     self.config.get_symbol(),
@@ -101,7 +110,7 @@ class Adrastea(TradingStrategy):
 
                 await self.calculate_indicators(candles)
 
-                first_index = heikin_ashi_candles_buffer + self.get_minimum_frames_count() - 1
+                first_index = self.heikin_ashi_candles_buffer + self.get_minimum_frames_count() - 1
                 last_index = tot_candles_count - 1  # Exclude last closed candle because it will be analysed in the first live loop, range is exclusive
 
                 for i in range(first_index, last_index):
@@ -141,6 +150,253 @@ class Adrastea(TradingStrategy):
     async def on_new_candle(self, candle: dict):
         async with self.execution_lock:
             log_info(f"Nuova candela ricevuta: {candle}")
+
+            timeframe = self.config.get_timeframe()
+            symbol = self.config.get_symbol()
+            trading_direction = self.config.get_trading_direction()
+
+            candles_count = self.heikin_ashi_candles_buffer + self.get_minimum_frames_count()
+
+            candles = await execute_broker_call(
+                self.broker.get_last_candles,
+                self.config.get_symbol(),
+                self.config.get_timeframe(),
+                candles_count
+            )
+            await self.calculate_indicators(candles)
+
+            last_candle = candles.iloc[-1]
+            log_info(f"Candle: {describe_candle(last_candle)}")
+
+            log_debug(f"Checking signals - Start: State={self.cur_state}, Number of Candles={len(candles)}, Timeframe={timeframe}, Symbol={symbol}, Trading Direction={trading_direction}")
+
+            log_debug("Checking for trading signals.")
+            self.should_enter, self.prev_state, self.cur_state, self.prev_condition_candle, self.cur_condition_candle = self.check_signals(rates=candles,
+                                                                                                                                           i=len(candles) - 1,
+                                                                                                                                           timeframe=timeframe,
+                                                                                                                                           symbol=symbol,
+                                                                                                                                           trading_direction=trading_direction,
+                                                                                                                                           state=self.cur_state,
+                                                                                                                                           last_condition_candle=self.cur_condition_candle)
+
+            log_debug(f"Checking signals - Results: should_enter={self.should_enter}, State={self.cur_state}, last_condition_candle={describe_candle(self.cur_condition_candle)}")
+
+            last_candle_time_str = f"{last_candle['time_open'].strftime('%Y-%m-%d %H:%M:%S')} - {last_candle['time_close'].strftime('%Y-%m-%d %H:%M:%S')}"
+            # log_candle(last_candle)
+
+            # notify_state_change(state_prev, state, candles, len(candles) - 1, params, last_condition_candle, should_enter)
+
+            if self.should_enter:
+                log_debug("Condition satisfied for placing an order. Sending entry signal notification.")
+                order_type_enter = OpType.BUY if trading_direction == TradingDirection.LONG else OpType.SELL
+                log_debug(f"Determined order type as {order_type_enter.label}.")
+                # send_entry_signal_notification(datetime.now(), order_type_enter)
+                log_info(f"Condition satisfied for candle {last_candle_time_str}, entry signal sent.")
+                log_debug("Processing order placement due to trading signal.")
+
+                if self.check_signal_confirmation_and_place_order(self.prev_condition_candle):
+                    order  =self.prepare_order_to_place(last_candle)
+                    self.place_order(order)
+            else:
+                log_info(f"No condition satisfied for candle {last_candle_time_str}")
+
+            try:
+                log_debug("Adding last candle to buffers and logging.")
+                live_candles_logger = CandlesLogger(symbol, timeframe, trading_direction, custom_name='live')
+                live_candles_logger.add_candle(last_candle)
+            except Exception as e:
+                log_error(f"Error while generating analysis data: {e}")
+
+    @exception_handler
+    async def prepare_order_to_place(self, cur_candle: Series) -> TradeOrder:
+        log_debug("[place_order] Starting the function.")
+
+        symbol = self.config.get_symbol()
+        trading_direction = self.config.get_trading_direction()
+        order_type_enter = OpType.BUY if trading_direction == TradingDirection.LONG else OpType.SELL
+        timeframe = self.config.get_timeframe()
+        magic_number = self.config.get_bot_magic_number()
+
+        symbol_info = await execute_broker_call(
+            self.broker.get_market_info,
+            symbol
+        )
+
+        if symbol_info is None:
+            log_error("[place_order] Symbol info not found.")
+            self.send_message_with_details("🚫 Symbol info not found for placing the order.")
+            raise Exception(f"Symbol info {symbol} not found.")
+
+        point = symbol_info.point
+        volume_min = symbol_info.volume_min
+
+        price = self.get_order_price(cur_candle, point, trading_direction)
+        sl = self.get_stop_loss(cur_candle, point, trading_direction)
+        tp = self.get_take_profit(cur_candle, price, point, timeframe, trading_direction)
+
+        account_balance = await execute_broker_call(
+            self.broker.get_account_balance
+        )
+        leverage = await execute_broker_call(
+            self.broker.get_account_leverage
+        )
+
+        volume = self.get_volume(account_balance, symbol, leverage, price)
+
+        log_info(f"[place_order] Account balance retrieved: {account_balance}, Leverage obtained: {leverage}, Calculated volume for the order on {symbol} at price {price}: {volume}")
+
+        if volume < volume_min:
+            log_warning(f"[place_order] Volume of {volume} is less than minimum of {volume_min}")
+            self.send_message_with_details(f"❗ Volume of {volume} is less than the minimum of {volume_min} for {symbol}.")
+            return False
+
+        return TradeOrder(order_type=order_type_enter,
+                           symbol=symbol,
+                           order_price=price,
+                           volume=volume,
+                           sl=sl,
+                           tp=tp,
+                           comment="bot-enter-signal",
+                           filling_mode=None,
+                           magic_number=magic_number)
+
+    def get_stop_loss(self, cur_candle: Series, symbol_point, trading_direction):
+        # Ensure 'supertrend_slow_key' is defined or passed to this function
+        supertrend_slow = cur_candle[supertrend_slow_key]
+
+        # Calculate stop loss adjustment factor
+        adjustment_factor = 0.003 / 100
+
+        # Adjust stop loss based on trading direction
+        if trading_direction == TradingDirection.LONG:
+            sl = supertrend_slow - (supertrend_slow * adjustment_factor)
+        elif trading_direction == TradingDirection.SHORT:
+            sl = supertrend_slow + (supertrend_slow * adjustment_factor)
+        else:
+            raise ValueError("Invalid trading direction")
+
+        # Return the stop loss rounded to the symbol's point value
+        return round_to_point(sl, symbol_point)
+
+    def get_take_profit(self, cur_candle: Series, order_price, symbol_point, timeframe, trading_direction):
+        atr_periods = 5 if trading_direction == TradingDirection.SHORT else 2
+        atr_key = f'ATR_{atr_periods}'
+        atr = cur_candle[atr_key]
+        multiplier = 1 if timeframe == Timeframe.M30 else 2
+        multiplier = multiplier * -1 if trading_direction == TradingDirection.SHORT else multiplier
+        take_profit_price = order_price + (multiplier * atr)
+
+        # Return the take profit price rounded to the symbol's point value
+        return round_to_point(take_profit_price, symbol_point)
+
+    def get_order_price(self, cur_candle: Series, symbol_point, trading_direction) -> float:
+        """
+        This function calculates the order price for a trade based on the trading direction and a small adjustment factor.
+
+        Parameters:
+        - candle (dict): A dictionary containing the OHLC (Open, High, Low, Close) values for a specific time period.
+        - symbol_point (float): The smallest price change for the trading symbol.
+        - trading_direction (TradingDirection): An enum value indicating the trading direction (LONG or SHORT).
+
+        Returns:
+        - float: The adjusted order price, rounded to the symbol's point value.
+
+        The function first determines the base price based on the trading direction. If the direction is LONG, the base price is the high price of the Heikin Ashi candle; if the direction is SHORT, the base price is the low price of the Heikin Ashi candle.
+
+        Then, it calculates a small adjustment to the base price. The adjustment is a fixed percentage (0.003%) of the base price. The adjustment is added to the base price for LONG trades and subtracted from the base price for SHORT trades.
+
+        Finally, the function returns the adjusted price, rounded to the symbol's point value.
+        """
+        # Determine the base price based on trading direction.
+        base_price_key = 'HA_high' if trading_direction == TradingDirection.LONG else 'HA_low'
+        base_price = cur_candle[base_price_key]
+
+        # Calculate the price adjustment.
+        adjustment_factor = 0.003 / 100
+        adjustment = adjustment_factor * base_price
+        adjusted_price = base_price + adjustment if trading_direction == TradingDirection.LONG else base_price - adjustment
+
+        # Return the price rounded to the symbol's point value.
+        return self.round_to_point(adjusted_price, symbol_point)
+
+    def get_volume(self, account_balance, symbol_info, leverage, entry_price):
+        """
+        Calculate the lot size based on a fixed percentage of the account balance, adjusted for leverage,
+        and ensuring compliance with the broker's lot size constraints.
+        """
+        # Calculate the capital to be invested in the trade
+        capital_to_invest = account_balance * 0.20 * leverage
+
+        # Calculate the lot size directly (volume in lotti)
+        lot_size = capital_to_invest / (entry_price * symbol_info.trade_contract_size)
+
+        # Adjust the lot size to meet the broker's minimum and maximum requirements
+        adjusted_lot_size = max(symbol_info.volume_min, min(symbol_info.volume_max, round_to_step(lot_size, symbol_info.volume_step)))
+
+        # Log warnings if necessary
+        if lot_size < symbol_info.volume_min:
+            log_warning(f"Adjusted lot size to {adjusted_lot_size} to meet minimum requirement of {symbol_info.volume_min} for {symbol_info.name}.")
+        if lot_size > symbol_info.volume_max:
+            log_warning(f"Adjusted lot size to {adjusted_lot_size} to meet maximum requirement of {symbol_info.volume_max} for {symbol_info.name}.")
+
+        return adjusted_lot_size
+
+    async def place_order(self, order: TradeOrder) -> bool:
+
+        log_info(f"[place_order] Placing order: {order}")
+
+        response = self.broker.place_order(order)
+
+        log_debug(f"[place_order] Result of order placement: {response.success}")
+
+        log_message = f"{response.server_response_code} - {response.server_response_message}"
+
+        if response.success:
+            log_info(f"[place_order] Order successfully placed. Platform log: \"{log_message}\"")
+            self.send_message_with_details(
+                f"✅ <b>Order successfully placed with Deal ID {response.deal}:</b>\n\n"
+                f"{order}"
+            )
+        else:
+            log_error("[place_order] Error while placing the order.")
+            self.send_message_with_details(f"🚫 <b>Error while placing the order:</b>\n\n"
+                                      f"{order}\n"
+                                      f"Platform log: \"{log_message}\"")
+
+        return response.success
+
+    def check_signal_confirmation_and_place_order(self, signal_candle):
+        bot_name = ConfigReader().get_bot_name()
+        magic = ConfigReader().get_bot_magic_number()
+        open_dt = signal_candle['time_open'].strftime('%H:%M')
+        close_dt = signal_candle['time_close'].strftime('%H:%M')
+
+        signal_id = {
+            "bot_name": bot_name,
+            "magic_number": magic,
+            "open_time": open_dt,
+            "close_time": close_dt
+        }
+
+        # Retrieve the signal confirmation from MongoDB
+        signal_confirmation = MongoDB().find_one("signals_confirmation", signal_id)
+
+        if not signal_confirmation:
+            log_error(f"No confirmation found for signal with open time {open_dt} and close time {close_dt}")
+            self.send_message_with_details(f"🚫 No confirmation found for signal with open time {open_dt} and close time {close_dt}. Not placing order by default.")
+            return False
+
+        confirmed = signal_confirmation.get("confirmation", False)
+        user_username = signal_confirmation.get("user_name", "Unknown User")
+
+        if confirmed:
+            log_info(f"Signal for candle {open_dt} - {close_dt} confirmed by {user_username}. Placing order.")
+            self.send_message_with_details(f"✅ Signal for candle {open_dt} - {close_dt} confirmed by {user_username}. Placing order.")
+        else:
+            log_info(f"Signal for candle {open_dt} - {close_dt} not confirmed by {user_username}. Not placing order.")
+            self.send_message_with_details(f"🚫 Signal for candle {open_dt} - {close_dt} not confirmed by {user_username}. Not placing order.")
+
+        return confirmed
 
     @exception_handler
     async def on_market_status_change(self, is_open: bool, closing_time: float, opening_time: float):
@@ -392,3 +648,131 @@ class Adrastea(TradingStrategy):
 
         # Returns the previous state, current updated state, and the last condition-matching candle index.
         return old_state, ret_state, prev_condition_candle, ret_candle
+
+    def send_message(self, message, level=NotificationLevel.DEFAULT, reply_markup=None):
+        config = ConfigReader()
+        if not config.get_telegram_active():
+            return
+
+        # Check if the notification level is high enough to send
+        send_notification = level.value >= config.get_telegram_notification_level().value
+        if not send_notification:
+            return
+
+        t_token = config.get_telegram_token()
+        t_chat_ids = config.get_telegram_chat_ids()
+        for chat_id in t_chat_ids:
+            TelegramBotWrapper(t_token).send_message(chat_id, message, reply_markup=reply_markup)
+
+    def send_message_with_details(self, message, level=NotificationLevel.DEFAULT, reply_markup=None):
+        symbol, bot_name, timeframe, trading_direction = (self.config.get_symbol(),
+                                                          self.config.get_bot_name(),
+                                                          self.config.get_timeframe(),
+                                                          self.config.get_trading_direction())
+        direction_emoji = "⬆️" if trading_direction.name == "LONG" else "⬇️"
+        detailed_message = (
+            f"{message}\n\n"
+            "<b>Details:</b>\n"
+            f"🤖 <b>Bot name:</b> {bot_name}\n"
+            f"💱 <b>Symbol:</b> {symbol}\n"
+            f"🕒 <b>Timeframe:</b> {timeframe.name}\n"
+            f"{direction_emoji} <b>Direction:</b> {trading_direction.name}"
+        )
+        self.send_message(detailed_message, level, reply_markup)
+
+    async def signal_confirmation_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        await query.answer()
+        log_debug(f"Callback query answered: {query}")
+
+        # Retrieve data from callback, now in CSV format
+        data = query.data.split(',')
+        log_debug(f"Data retrieved from callback: {data}")
+        bot_name, magic, open_dt, close_dt, confirmed_flag = data
+        confirmed = confirmed_flag == '1'
+        user_username = query.from_user.username if query.from_user.username else "Unknown User"
+        user_id = query.from_user.id
+        chat_id = update.effective_chat.id
+        chat_username = update.effective_chat.username
+        log_debug(
+            f"Parsed data - bot_name: {bot_name}, magic: {magic}, open_dt: {open_dt}, close_dt: {close_dt}, confirmed: {confirmed}, user_username: {user_username}, user_id: {user_id}, chat_id: {chat_id}, chat_username: {chat_username}")
+
+        # Create CSV formatted confirmation and blocking data
+        csv_confirm = f"{bot_name},{magic},{open_dt},{close_dt},1"
+        csv_block = f"{bot_name},{magic},{open_dt},{close_dt},0"
+        log_debug(f"CSV formatted data - confirm: {csv_confirm}, block: {csv_block}")
+
+        current_bot_name = ConfigReader().get_bot_name()
+        current_magic_number = ConfigReader().get_bot_magic_number()
+        log_debug(f"Current bot configuration - bot_name: {current_bot_name}, magic_number: {current_magic_number}")
+        if bot_name != current_bot_name or int(magic) != current_magic_number:
+            log_info(f"Ignored update for bot_name '{bot_name}' and magic number '{magic}' as they do not match the current instance '{current_bot_name}' and magic number '{current_magic_number}'.")
+            return
+
+        # Set the keyboard buttons with updated callback data
+        if confirmed:
+            keyboard = [
+                [
+                    InlineKeyboardButton("Confirmed ✔️", callback_data=csv_confirm),
+                    InlineKeyboardButton("Blocked", callback_data=csv_block)
+                ]
+            ]
+        else:
+            keyboard = [
+                [
+                    InlineKeyboardButton("Confirm", callback_data=csv_confirm),
+                    InlineKeyboardButton("Ignored ✔️", callback_data=csv_block)
+                ]
+            ]
+        log_debug(f"Keyboard set with updated callback data: {keyboard}")
+
+        # Update the inline keyboard
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+
+        # Update the database
+        obj = {
+            "bot_name": bot_name,
+            "magic_number": int(magic),
+            "open_time": open_dt,
+            "close_time": close_dt,
+            "confirmation": confirmed,
+            "last_update_tms": now_utc(),
+            "user_name": user_username,
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "chat_username": chat_username
+        }
+        log_debug(f"Database object to upsert: {obj}")
+        MongoDB().upsert("signals_confirmation", {"bot_name": bot_name,
+                                                  "magic_number": int(magic),
+                                                  "open_time": open_dt,
+                                                  "close_time": close_dt}, obj)
+        log_debug("Database updated with new signal confirmation")
+
+        choice_text = "✅ Confirm" if confirmed else "🚫 Ignore"
+        message = f"ℹ️ Your choice to <b>{choice_text}</b> the signal for the candle from {open_dt} to {close_dt} has been successfully saved."
+        self.send_message(message)
+        log_debug(f"Confirmation message sent: {message}")
+
+    def get_signal_confirmation_dialog(self, candle) -> InlineKeyboardMarkup:
+        log_debug("Starting signal confirmation dialog creation")
+        bot_name = ConfigReader().get_bot_name()
+        magic = ConfigReader().get_bot_magic_number()
+
+        open_dt = candle['time_open'].strftime('%H:%M')
+        close_dt = candle['time_close'].strftime('%H:%M')
+
+        csv_confirm = f"{bot_name},{magic},{open_dt},{close_dt},1"
+        csv_block = f"{bot_name},{magic},{open_dt},{close_dt},0"
+        log_debug(f"CSV data - confirm: {csv_confirm}, block: {csv_block}")
+
+        keyboard = [
+            [
+                InlineKeyboardButton("Confirm", callback_data=csv_confirm),
+                InlineKeyboardButton("Ignore", callback_data=csv_block)
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        log_debug(f"Keyboard created: {keyboard}")
+
+        return reply_markup
