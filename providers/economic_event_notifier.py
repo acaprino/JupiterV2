@@ -24,18 +24,22 @@ class EconomicEventNotifier:
         self.importance = None
         self.broker = broker
         self.symbol = symbol
-        self.execution_lock = execution_lock  # Lock per sincronizzare le esecuzioni
-        self._on_economic_event_callbacks: List[Callable[[Dict], Awaitable[None]]] = []
         self.processed_events = {}  # Dizionario per tracciare gli eventi già elaborati
+        self._running = False
+        self._task = None
+        self._on_economic_event_callbacks: List[Callable[[Dict], Awaitable[None]]] = []
+        self.execution_lock = execution_lock  # Lock per sincronizzare le esecuzioni
 
     async def start(self):
-        # Configurazioni
-        self.sandbox_dir = await execute_broker_call(self.broker.get_working_directory)
-        self.json_file_path = os.path.join(self.sandbox_dir, 'economic_calendar.json')
-        self.interval_seconds = 60 * 5
-        self.importance = 3
-        log_info(f"[EconomicEventNotifier] Avvio del monitoraggio degli eventi economici per {self.symbol}.")
-        asyncio.create_task(self._run())
+        if not self._running:
+            # Configurazioni
+            self.sandbox_dir = await execute_broker_call(self.broker.get_working_directory)
+            self.json_file_path = os.path.join(self.sandbox_dir, 'economic_calendar.json')
+            self.interval_seconds = 60 * 5
+            self.importance = 3
+            self._running = True
+            self._task = asyncio.create_task(self._run())
+            log_info(f"Candle provider per {self.symbol} avviato.")
 
     def register_on_economic_event(self, callback: Callable[[Dict], Awaitable[None]]):
         if not callable(callback):
@@ -49,7 +53,7 @@ class EconomicEventNotifier:
             log_debug(f"[EconomicEventNotifier] Callback annullato: {callback}")
 
     async def _run(self):
-        while True:
+        while self._running:
             try:
                 is_market_open = await execute_broker_call(self.broker.get_market_status, self.symbol)
                 if not is_market_open:
@@ -214,3 +218,17 @@ class EconomicEventNotifier:
                 return pair
         log_error(f"Symbol '{symbol}' not found in pairs.json")
         return None
+
+    async def stop(self):
+        """
+        Arresta il provider di candele.
+        """
+        if self._running:
+            self._running = False
+            if self._task:
+                self._task.cancel()
+                try:
+                    await self._task
+                except asyncio.CancelledError:
+                    pass
+            log_info(f"Candle provider per {self.symbol} fermato.")

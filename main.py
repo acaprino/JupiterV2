@@ -12,8 +12,8 @@ from strategies.adrastea import Adrastea
 from brokers.mt5_broker import MT5Broker
 from utils.config import ConfigReader
 from utils.logger import log_init, log_info
-from utils.telegram_lib import TelegramBotWrapper
 
+from utils.async_executor import executor
 
 async def main(config_file_param: str):
     """
@@ -64,13 +64,11 @@ async def main(config_file_param: str):
         # Arresta i provider e chiudi la connessione broker
         await candle_provider.stop()
         await market_state_notifier.stop()
+        await economic_event_notifier.stop()
         broker.shutdown()
         log_info("Programma terminato.")
 
-        # Chiudi l'esecutore asincrono
-        from utils.async_executor import executor
         executor.shutdown()
-
 
 if __name__ == "__main__":
     sys.stdin.reconfigure(encoding='utf-8')

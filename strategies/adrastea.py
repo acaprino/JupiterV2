@@ -7,6 +7,7 @@ import pandas as pd
 from pandas import Series
 
 from csv_loggers.candles_logger import CandlesLogger
+from csv_loggers.strategy_events_logger import StrategyEventsLogger
 from datao import TradeOrder
 from datao.SymbolInfo import SymbolInfo
 from providers.candle_provider import CandleProvider
@@ -130,6 +131,8 @@ class Adrastea(TradingStrategy):
 
                 log_debug(f"Finished bootstrap process with state={self.cur_state} and last_condition_candle={describe_candle(self.cur_condition_candle)}")
 
+                self.send_message_with_details(f"🔄 Bootstrapping Complete - <b>Bot Ready for Trading</b>")
+
                 # Qui puoi aggiungere logica per inizializzare indicatori o altri componenti
                 log_info(f"Recuperate {len(candles)} candele storiche per inizializzare la strategia.")
                 self.initialized = True
@@ -145,6 +148,99 @@ class Adrastea(TradingStrategy):
                    supertrend_fast_multiplier,
                    supertrend_slow_period,
                    supertrend_slow_multiplier) + 1
+
+    def notify_state_change(self, state_prev, state_cur, rates, i, params, last_condition_candle, should_enter):
+        symbol, timeframe, trading_direction, bot_mode = (
+            params['symbol'], params['timeframe'], params['trading_direction'], params['bot_mode']
+        )
+
+        events_logger = StrategyEventsLogger(symbol, timeframe, trading_direction, bot_mode)
+        cur_candle = rates.iloc[i]
+        close = cur_candle['HA_close']
+
+        # Extract required indicator values from the candles
+        supert_fast_prev = rates[supertrend_fast_key][i - 1]
+        supert_slow_prev = rates[supertrend_slow_key][i - 1]
+        supert_fast_cur = rates[supertrend_fast_key][i]
+        supert_slow_cur = rates[supertrend_slow_key][i]
+        stoch_k_cur = rates[stoch_k_key][i]
+        stoch_d_cur = rates[stoch_d_key][i]
+
+        is_long = trading_direction == TradingDirection.LONG
+        is_short = trading_direction == TradingDirection.SHORT
+
+        def notify_event(event):
+            log_debug(event)
+            events_logger.add_event(
+                cur_candle['time_open'], cur_candle['time_close'], close,
+                state_prev, state_cur, event,
+                supert_fast_prev, supert_slow_prev, supert_fast_cur, supert_slow_cur,
+                stoch_k_cur, stoch_d_cur
+            )
+            self.send_message_with_details(event)
+
+        # Handle state transitions and trigger notifications
+        if state_cur == 1 and state_prev == 0:
+            if is_long:
+                notify_event(f"1️⃣ ✅ <b>Condition 1 matched</b>: Price {close} is above the slow Supertrend level {supert_slow_prev}, validating long position.")
+            elif is_short:
+                notify_event(f"1️⃣ ✅ <b>Condition 1 matched</b>: Price {close} is below the slow Supertrend level {supert_slow_prev}, validating short position.")
+        elif state_cur == 0 and state_prev == 1:
+            if is_long:
+                notify_event(f"1️⃣ ❌ <b>Condition 1 regressed</b>: Price {close} is now below the slow Supertrend level {supert_slow_prev}, invalidating the long position.")
+            elif is_short:
+                notify_event(f"1️⃣ ❌ <b>Condition 1 regressed</b>: Price {close} is now above the slow Supertrend level {supert_slow_prev}, invalidating the short position.")
+
+        elif state_cur == 2 and state_prev == 1:
+            if is_long:
+                notify_event(f"2️⃣ ✅ <b>Condition 2 matched</b>: Price {close} is below the fast Supertrend level {supert_fast_cur}, valid for long trade.")
+            elif is_short:
+                notify_event(f"2️⃣ ✅ <b>Condition 2 matched</b>: Price {close} is above the fast Supertrend level {supert_fast_cur}, valid for short trade.")
+        elif state_cur == 1 and state_prev == 2:
+            if is_long:
+                notify_event(f"2️⃣ ❌ <b>Condition 2 regressed</b>: Price {close} failed to remain below the fast Supertrend level {supert_fast_cur}.")
+            elif is_short:
+                notify_event(f"2️⃣ ❌ <b>Condition 2 regressed</b>: Price {close} failed to remain above the fast Supertrend level {supert_fast_cur}.")
+
+        elif state_cur == 3 and state_prev == 2:
+            if is_long:
+                notify_event(f"3️⃣ ✅ <b>Condition 3 matched</b>: Price {close} remains above the fast Supertrend level {supert_fast_prev}, confirming long trade.")
+            elif is_short:
+                notify_event(f"3️⃣ ✅ <b>Condition 3 matched</b>: Price {close} remains below the fast Supertrend level {supert_fast_prev}, confirming short trade.")
+        elif state_cur == 2 and state_prev == 3:
+            if is_long:
+                notify_event(f"3️⃣ ❌ <b>Condition 3 regressed</b>: Price {close} failed to maintain above the fast Supertrend level {supert_fast_prev}, invalidating the long trade.")
+            elif is_short:
+                notify_event(f"3️⃣ ❌ <b>Condition 3 regressed</b>: Price {close} failed to maintain below the fast Supertrend level {supert_fast_prev}, invalidating the short trade.")
+
+        elif state_cur == 4 and state_prev == 3:
+            if is_long:
+                notify_event(f"4️⃣ ✅ <b>Condition 4 matched</b>: Stochastic K ({stoch_k_cur}) crossed above D ({stoch_d_cur}) and D is below 50, confirming bullish momentum.")
+            elif is_short:
+                notify_event(f"4️⃣ ✅ <b>Condition 4 matched</b>: Stochastic K ({stoch_k_cur}) crossed below D ({stoch_d_cur}) and D is above 50, confirming bearish momentum.")
+
+        elif state_cur == 3 and state_prev == 4:
+            if is_long:
+                notify_event(f"4️⃣ ❌ <b>Condition 4 regressed</b>: Stochastic K ({stoch_k_cur}) is no longer above D ({stoch_d_cur}).")
+            elif is_short:
+                notify_event(f"4️⃣ ❌ <b>Condition 4 regressed</b>: Stochastic K ({stoch_k_cur}) is no longer below D ({stoch_d_cur}).")
+
+        if should_enter:
+            t_open = last_condition_candle['time_open'].strftime('%H:%M')
+            t_close = last_condition_candle['time_close'].strftime('%H:%M')
+
+            trading_opportunity_message = (f"🚀 <b>Alert!</b> A new trading opportunity has been identified on frame {t_open} - {t_close}.\n\n"
+                                           f"🔔 Would you like to confirm the placement of this order?\n\n"
+                                           "Select an option to place the order or ignore this signal (by default, the signal will be <b>ignored</b> if no selection is made).")
+            reply_markup = self.get_signal_confirmation_dialog(last_condition_candle)
+
+            self.send_message_with_details(trading_opportunity_message, reply_markup=reply_markup)
+
+            dir_str = "long" if is_long else "short"
+            cur_candle_time = f"{cur_candle['time_open'].strftime('%H:%M')} - {cur_candle['time_close'].strftime('%H:%M')}"
+            last_condition_candle_time = f"{last_condition_candle['time_open'].strftime('%H:%M')} - {last_condition_candle['time_close'].strftime('%H:%M')}"
+            notify_event(
+                f"5️⃣ ✅ <b>Condition 5 matched</b>: Final signal generated for {dir_str} trade. The current candle time {cur_candle_time} is from the candle following the last condition candle: {last_condition_candle_time}")
 
     @exception_handler
     async def on_new_candle(self, candle: dict):
@@ -195,8 +291,8 @@ class Adrastea(TradingStrategy):
                 log_debug("Processing order placement due to trading signal.")
 
                 if self.check_signal_confirmation_and_place_order(self.prev_condition_candle):
-                    order  =self.prepare_order_to_place(last_candle)
-                    self.place_order(order)
+                    order = self.prepare_order_to_place(last_candle)
+                    await self.place_order(order)
             else:
                 log_info(f"No condition satisfied for candle {last_candle_time_str}")
 
@@ -251,14 +347,14 @@ class Adrastea(TradingStrategy):
             return False
 
         return TradeOrder(order_type=order_type_enter,
-                           symbol=symbol,
-                           order_price=price,
-                           volume=volume,
-                           sl=sl,
-                           tp=tp,
-                           comment="bot-enter-signal",
-                           filling_mode=None,
-                           magic_number=magic_number)
+                          symbol=symbol,
+                          order_price=price,
+                          volume=volume,
+                          sl=sl,
+                          tp=tp,
+                          comment="bot-enter-signal",
+                          filling_mode=None,
+                          magic_number=magic_number)
 
     def get_stop_loss(self, cur_candle: Series, symbol_point, trading_direction):
         # Ensure 'supertrend_slow_key' is defined or passed to this function
@@ -360,8 +456,8 @@ class Adrastea(TradingStrategy):
         else:
             log_error("[place_order] Error while placing the order.")
             self.send_message_with_details(f"🚫 <b>Error while placing the order:</b>\n\n"
-                                      f"{order}\n"
-                                      f"Platform log: \"{log_message}\"")
+                                           f"{order}\n"
+                                           f"Platform log: \"{log_message}\"")
 
         return response.success
 
