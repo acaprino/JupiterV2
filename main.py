@@ -6,7 +6,7 @@ import warnings
 
 from brokers.broker_interface import BrokerAPI
 from providers.candle_provider import CandleProvider
-from providers.deal_status_notifier import ClosedDealsNotifier
+from providers.closed_deals_notifier import ClosedDealsNotifier
 from providers.economic_event_notifier import EconomicEventNotifier
 from providers.market_state_notifier import MarketStateNotifier
 from strategies.adrastea import Adrastea
