@@ -34,5 +34,10 @@
     ],
     "active": true,
     "notification_level": "debug"
+  },
+  "mongo": {
+    "host": "192.54.56.115",
+    "port": "27017",
+    "db_name": "jupiter"
   }
 }

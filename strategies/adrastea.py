@@ -10,7 +10,7 @@ from pandas import Series
 from csv_loggers.candles_logger import CandlesLogger
 from csv_loggers.strategy_events_logger import StrategyEventsLogger
 from datao import TradeOrder
-from datao.Position import Position
+from datao.Deal import Deal
 from datao.RequestResult import RequestResult
 from datao.SymbolInfo import SymbolInfo
 from providers.candle_provider import CandleProvider
@@ -26,7 +26,7 @@ from brokers.broker_interface import BrokerAPI
 from utils.logger import log_info, log_error, log_debug, log_warning
 from utils.mongo_db import MongoDB
 from utils.telegram_lib import TelegramBotWrapper
-from utils.utils import describe_candle, now_utc, round_to_step, round_to_point, dt_to_unix
+from utils.utils_functions import describe_candle, now_utc, round_to_step, round_to_point, dt_to_unix
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
@@ -504,7 +504,7 @@ class Adrastea(TradingStrategy):
                 self.send_message_with_details(f"🔔 Market for {symbol} has just <b>closed</b>. Pausing trading activities.")
 
     @exception_handler
-    async def on_deal_closed(self, position: Position):
+    async def on_deal_closed(self, position: Deal):
         async with self.execution_lock:
             log_info(f"Deal closed: {position}")
 
@@ -543,7 +543,7 @@ class Adrastea(TradingStrategy):
             event_name = event_info.get('event_name', 'Unknown Event')
             symbol, magic_number = (self.config.get_symbol(), self.config.get_bot_magic_number())
 
-            positions: List[Position] = await execute_broker_call(
+            positions: List[Deal] = await execute_broker_call(
                 self.broker.get_open_positions,
                 symbol=symbol, magic_number=magic_number
             )

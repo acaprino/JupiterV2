@@ -5,7 +5,7 @@ from typing import Optional, List, Dict
 from pandas import Series
 
 from datao import SymbolInfo, TradeOrder, SymbolPrice
-from datao.Position import Position
+from datao.Deal import Deal
 from datao.RequestResult import RequestResult
 
 
@@ -56,13 +56,13 @@ class BrokerAPI(ABC):
         pass
 
     @abstractmethod
-    def get_open_positions(self, symbol: str, magic_number: Optional[int] = None) -> List[Position]:
+    def get_open_positions(self, symbol: str, magic_number: Optional[int] = None) -> List[Deal]:
         pass
 
     @abstractmethod
-    def close_position(self, position: Position, comment: Optional[str] = None, magic_number: Optional[int] = None) -> RequestResult:
+    def close_position(self, position: Deal, comment: Optional[str] = None, magic_number: Optional[int] = None) -> RequestResult:
         pass
 
     @abstractmethod
-    def get_deals(self, from_tms: datetime, to_tms: datetime, magic_number: Optional[int] = None, symbol: Optional[str] = None) -> Dict[int, List[Position]]:
+    def get_deals(self, from_tms: datetime, to_tms: datetime, symbol: Optional[str] = None, magic_number: Optional[int] = None) -> Dict[int, List[Deal]]:
         pass

@@ -6,7 +6,7 @@ import warnings
 
 from brokers.broker_interface import BrokerAPI
 from providers.candle_provider import CandleProvider
-from providers.closed_deals_notifier import ClosedDealsNotifier
+from providers.closed_positions_notifier import ClosedPositionNotifier
 from providers.economic_event_notifier import EconomicEventNotifier
 from providers.market_state_notifier import MarketStateNotifier
 from strategies.adrastea import Adrastea
@@ -23,15 +23,16 @@ async def main(config_file: str):
     Main function that starts the asynchronous trading bot.
     """
     config = ConfigReader(config_file)
+
+    # Configure logging
+    warnings.filterwarnings('ignore', category=FutureWarning)
+    log_init(config.get_bot_name(), config.get_bot_version(), config.get_bot_logging_level())
+
     mongo_db = MongoDB(config.get_mongo_host(), config.get_mongo_port())
 
     if not mongo_db.test_connection():
         log_error("MongoDB connection failed. Exiting...")
         return
-
-    # Configure logging
-    warnings.filterwarnings('ignore', category=FutureWarning)
-    log_init(config.get_bot_name(), config.get_bot_version(), config.get_bot_logging_level())
 
     # Initialize the broker
     broker: BrokerAPI = MT5Broker(config)
@@ -42,8 +43,8 @@ async def main(config_file: str):
     # Initialize the MarketStateNotifier
     market_state_notifier = MarketStateNotifier(broker, config.get_symbol(), execution_lock)
     candle_provider = CandleProvider(broker, symbol=config.get_symbol(), timeframe=config.get_timeframe(), execution_lock=execution_lock)
-    economic_event_notifier = EconomicEventNotifier(broker, config.get_symbol(), execution_lock)
-    closed_deals_notifier = ClosedDealsNotifier(broker, config.get_symbol(), execution_lock)
+    economic_event_notifier = EconomicEventNotifier(broker, symbol=config.get_symbol(), execution_lock=execution_lock)
+    closed_deals_notifier = ClosedPositionNotifier(broker, symbol=config.get_symbol(), magic_number=config.get_bot_magic_number(), execution_lock=execution_lock)
 
     # Instantiate the strategy
     strategy = Adrastea(broker, config, market_state_notifier, candle_provider)

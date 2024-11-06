@@ -1,14 +1,14 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+
 
 @dataclass
-class Position:
+class Deal:
     ticket: int
-    time: datetime  # Tempo di apertura come oggetto datetime
-    time_msc: int  # Millisecondi del tempo di apertura
-    time_update: datetime  # Ultima volta di aggiornamento come oggetto datetime
-    time_update_msc: int  # Millisecondi dell'ultimo aggiornamento
+    time: datetime  # Opening time as a datetime object
+    time_msc: int  # Milliseconds of the opening time
+    time_update: datetime  # Last update time as a datetime object
+    time_update_msc: int  # Milliseconds of the last update
     type: int
     magic: int
     identifier: int

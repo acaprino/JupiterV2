@@ -11,7 +11,7 @@ from brokers.broker_interface import BrokerAPI
 from utils.async_executor import execute_broker_call
 from utils.error_handler import exception_handler
 from utils.logger import log_debug, log_info, log_warning, log_error
-from utils.utils import now_utc
+from utils.utils_functions import now_utc
 
 
 class EconomicEventNotifier:
@@ -73,7 +73,7 @@ class EconomicEventNotifier:
                     await asyncio.sleep(self.interval_seconds)
                     continue
 
-                now = now_utc()
+                now = now_utc().replace(microsecond=0)
 
                 # Calculate the next multiple of 5 minutes
                 next_run = self.get_next_run_time(now)
@@ -187,6 +187,7 @@ class EconomicEventNotifier:
         log_info(f"Handling event: {event_name} (ID: {event_id}) at {event_time}.")
 
         seconds_until_event = (event_time - datetime.now()).total_seconds()
+        event['seconds_until_event'] = seconds_until_event
 
         self.processed_events[event_id] = event_time
         log_debug(f"Event {event_id} marked as processed.")

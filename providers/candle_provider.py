@@ -2,15 +2,14 @@
 
 import asyncio
 import logging
-from datetime import datetime
 from typing import Callable, Awaitable, List
 
-from time import sleep, time
 from brokers.broker_interface import BrokerAPI
 from utils.async_executor import execute_broker_call
 from utils.enums import Timeframe
 from utils.error_handler import exception_handler
 from utils.logger import log_info
+from utils.utils_functions import dt_to_unix, now_utc, unix_to_datetime
 
 
 class CandleProvider:
@@ -81,9 +80,10 @@ class CandleProvider:
 
     async def wait_next_tick(self):
         timeframe_duration = self.timeframe.to_seconds()
-        current_time = time()
+        now = now_utc()
+        current_time = dt_to_unix(now)
         time_to_next_candle = timeframe_duration - (current_time % timeframe_duration)
-        next_candle_time = datetime.fromtimestamp(current_time + time_to_next_candle)
-        log_info(f"Waiting for the next candle. Current time: {datetime.now()}, Next candle at: {next_candle_time}")
+        next_candle_time = unix_to_datetime(current_time + time_to_next_candle).replace(microsecond=0)
+        log_info(f"Waiting for the next candle: current time: {now}, next candle at: {next_candle_time}")
         await asyncio.sleep(time_to_next_candle)
-        log_info(f"New candle started. Current time: {datetime.now()}")
+        log_info(f"New candle started, current time: {now_utc()}")

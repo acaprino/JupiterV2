@@ -1,14 +1,14 @@
 import calendar
 import math
 import time
+from typing import Union
+
 import numpy as np
 import pandas as pd
 import pytz
 import os
 
 from datetime import timedelta, datetime, timezone
-
-from pandas import Timestamp
 
 from collections import deque
 from tzlocal import get_localzone
@@ -20,7 +20,13 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def dt_to_unix(dt) -> float:
+def dt_to_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        raise ValueError("The datetime object must be timezone-aware.")
+    return dt.astimezone(pytz.UTC)
+
+
+def dt_to_unix(dt: datetime) -> float:
     if dt is None:
         return -1
     elif dt.tzinfo is None:
@@ -32,8 +38,11 @@ def dt_to_unix(dt) -> float:
         return int(dt_utc.timestamp())
 
 
-def unix_to_datetime(unix_timestamp):
-    datetime.fromtimestamp(unix_timestamp, tz=timezone.utc).replace(tzinfo=None)
+def unix_to_datetime(unix_timestamp: Union[int, float]) -> datetime:
+    try:
+        return datetime.fromtimestamp(unix_timestamp, tz=timezone.utc).replace(tzinfo=None)
+    except (OverflowError, OSError, ValueError) as e:
+        raise ValueError(f"Timestamp UNIX non valido: {unix_timestamp}") from e
 
 
 def get_recent_past_multiple_of_timeframe(timeframe):

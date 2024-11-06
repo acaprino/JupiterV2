@@ -7,7 +7,7 @@ from datetime import datetime
 
 from logging.handlers import RotatingFileHandler
 
-from utils.utils import create_directories
+from utils.utils_functions import create_directories
 
 
 class CSVLogger:

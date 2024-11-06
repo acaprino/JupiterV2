@@ -1,6 +1,6 @@
 import json
 from utils.enums import BotMode, TradingDirection, Timeframe, NotificationLevel
-from utils.utils import string_to_enum
+from utils.utils_functions import string_to_enum
 
 
 class ConfigReader:

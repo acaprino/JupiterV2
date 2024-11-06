@@ -9,7 +9,7 @@ import pandas as pd
 from pandas import Series
 
 from brokers.broker_interface import BrokerAPI
-from datao import Position
+from datao import Deal
 from datao.RequestResult import RequestResult
 from datao.SymbolInfo import SymbolInfo
 from datao.SymbolPrice import SymbolPrice
@@ -17,7 +17,7 @@ from datao.TradeOrder import TradeOrder
 from utils.config import ConfigReader
 from utils.enums import Timeframe, FillingType, OpType
 from utils.logger import log_warning, log_error, log_info, log_debug
-from utils.utils import now_utc, dt_to_unix
+from utils.utils_functions import now_utc, dt_to_unix, unix_to_datetime
 
 
 class MT5Broker(BrokerAPI):
@@ -349,14 +349,19 @@ class MT5Broker(BrokerAPI):
 
         return req_result
 
-    def get_deals(self, from_tms: datetime, to_tms: datetime, magic_number: Optional[int] = None, symbol: Optional[str] = None) -> Dict[int, List[Any]]:
+    def get_deals(self, from_tms: datetime, to_tms: datetime, symbol: Optional[str] = None, magic_number: Optional[int] = None) -> Dict[int, List[Any]]:
         from_unix = dt_to_unix(from_tms)
         to_unix = dt_to_unix(to_tms)
-        closed_deals = mt5.history_deals_get(from_unix, to_unix, group=symbol)
+        deals = mt5.history_deals_get(from_unix, to_unix)
+        timezone_offset = self.get_broker_timezone_offset(symbol)
+
+        if deals is None:
+            return {}
 
         filtered_deals = (
-            deal for deal in closed_deals
+            deal for deal in deals
             if (magic_number is None or deal.magic == magic_number)
+            if (symbol is None or deal.symbol == symbol)
         )
 
         positions: List[Position] = []
@@ -364,9 +369,8 @@ class MT5Broker(BrokerAPI):
         for deal in filtered_deals:
             position = Position(
                 ticket=deal.ticket,
-                time=datetime.fromtimestamp(deal.time),
+                time=unix_to_datetime(deal.time) - timedelta(hours=timezone_offset) if deal.time is not None else None,
                 time_msc=deal.time_msc,
-                time_update=datetime.fromtimestamp(deal.time_update),
                 time_update_msc=deal.time_update_msc,
                 type=deal.type,
                 magic=deal.magic,
