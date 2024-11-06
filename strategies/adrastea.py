@@ -1,7 +1,7 @@
 # strategies/my_strategy.py
 
 import math
-from typing import List
+from typing import List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -26,7 +26,7 @@ from brokers.broker_interface import BrokerAPI
 from utils.logger import log_info, log_error, log_debug, log_warning
 from utils.mongo_db import MongoDB
 from utils.telegram_lib import TelegramBotWrapper
-from utils.utils import describe_candle, now_utc, round_to_step, round_to_point
+from utils.utils import describe_candle, now_utc, round_to_step, round_to_point, dt_to_unix
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
@@ -126,18 +126,14 @@ class Adrastea(TradingStrategy):
                     bootstrap_candles_logger.add_candle(candles.iloc[i])
                     self.should_enter, self.prev_state, self.cur_state, self.prev_condition_candle, self.cur_condition_candle = self.check_signals(rates=candles,
                                                                                                                                                    i=i,
-                                                                                                                                                   timeframe=timeframe,
-                                                                                                                                                   symbol=symbol,
                                                                                                                                                    trading_direction=trading_direction,
                                                                                                                                                    state=self.cur_state,
-                                                                                                                                                   last_condition_candle=self.cur_condition_candle)
+                                                                                                                                                   cur_condition_candle=self.cur_condition_candle)
 
                 log_debug(f"Finished bootstrap process with state={self.cur_state} and last_condition_candle={describe_candle(self.cur_condition_candle)}")
 
                 self.send_message_with_details(f"🔄 Bootstrapping Complete - <b>Bot Ready for Trading</b>")
-
-                # Qui puoi aggiungere logica per inizializzare indicatori o altri componenti
-                log_info(f"Recuperate {len(candles)} candele storiche per inizializzare la strategia.")
+                self.notify_state_change(candles, last_index)
                 self.initialized = True
             except Exception as e:
                 log_error(f"Errore nel bootstrap della strategia: {e}")
@@ -152,12 +148,12 @@ class Adrastea(TradingStrategy):
                    supertrend_slow_period,
                    supertrend_slow_multiplier) + 1
 
-    def notify_state_change(self, state_prev, state_cur, rates, i, params, last_condition_candle, should_enter):
-        symbol, timeframe, trading_direction, bot_mode = (
-            params['symbol'], params['timeframe'], params['trading_direction'], params['bot_mode']
+    def notify_state_change(self, rates, i):
+        symbol, timeframe, trading_direction = (
+            self.config.get_symbol(), self.config.get_timeframe(), self.config.get_trading_direction()
         )
 
-        events_logger = StrategyEventsLogger(symbol, timeframe, trading_direction, bot_mode)
+        events_logger = StrategyEventsLogger(symbol, timeframe, trading_direction)
         cur_candle = rates.iloc[i]
         close = cur_candle['HA_close']
 
@@ -176,72 +172,72 @@ class Adrastea(TradingStrategy):
             log_debug(event)
             events_logger.add_event(
                 cur_candle['time_open'], cur_candle['time_close'], close,
-                state_prev, state_cur, event,
+                self.prev_state, self.cur_state, event,
                 supert_fast_prev, supert_slow_prev, supert_fast_cur, supert_slow_cur,
                 stoch_k_cur, stoch_d_cur
             )
             self.send_message_with_details(event)
 
         # Handle state transitions and trigger notifications
-        if state_cur == 1 and state_prev == 0:
+        if self.cur_state == 1 and self.prev_state == 0:
             if is_long:
                 notify_event(f"1️⃣ ✅ <b>Condition 1 matched</b>: Price {close} is above the slow Supertrend level {supert_slow_prev}, validating long position.")
             elif is_short:
                 notify_event(f"1️⃣ ✅ <b>Condition 1 matched</b>: Price {close} is below the slow Supertrend level {supert_slow_prev}, validating short position.")
-        elif state_cur == 0 and state_prev == 1:
+        elif self.cur_state == 0 and self.prev_state == 1:
             if is_long:
                 notify_event(f"1️⃣ ❌ <b>Condition 1 regressed</b>: Price {close} is now below the slow Supertrend level {supert_slow_prev}, invalidating the long position.")
             elif is_short:
                 notify_event(f"1️⃣ ❌ <b>Condition 1 regressed</b>: Price {close} is now above the slow Supertrend level {supert_slow_prev}, invalidating the short position.")
 
-        elif state_cur == 2 and state_prev == 1:
+        elif self.cur_state == 2 and self.prev_state == 1:
             if is_long:
                 notify_event(f"2️⃣ ✅ <b>Condition 2 matched</b>: Price {close} is below the fast Supertrend level {supert_fast_cur}, valid for long trade.")
             elif is_short:
                 notify_event(f"2️⃣ ✅ <b>Condition 2 matched</b>: Price {close} is above the fast Supertrend level {supert_fast_cur}, valid for short trade.")
-        elif state_cur == 1 and state_prev == 2:
+        elif self.cur_state == 1 and self.prev_state == 2:
             if is_long:
                 notify_event(f"2️⃣ ❌ <b>Condition 2 regressed</b>: Price {close} failed to remain below the fast Supertrend level {supert_fast_cur}.")
             elif is_short:
                 notify_event(f"2️⃣ ❌ <b>Condition 2 regressed</b>: Price {close} failed to remain above the fast Supertrend level {supert_fast_cur}.")
 
-        elif state_cur == 3 and state_prev == 2:
+        elif self.cur_state == 3 and self.prev_state == 2:
             if is_long:
                 notify_event(f"3️⃣ ✅ <b>Condition 3 matched</b>: Price {close} remains above the fast Supertrend level {supert_fast_prev}, confirming long trade.")
             elif is_short:
                 notify_event(f"3️⃣ ✅ <b>Condition 3 matched</b>: Price {close} remains below the fast Supertrend level {supert_fast_prev}, confirming short trade.")
-        elif state_cur == 2 and state_prev == 3:
+        elif self.cur_state == 2 and self.prev_state == 3:
             if is_long:
                 notify_event(f"3️⃣ ❌ <b>Condition 3 regressed</b>: Price {close} failed to maintain above the fast Supertrend level {supert_fast_prev}, invalidating the long trade.")
             elif is_short:
                 notify_event(f"3️⃣ ❌ <b>Condition 3 regressed</b>: Price {close} failed to maintain below the fast Supertrend level {supert_fast_prev}, invalidating the short trade.")
 
-        elif state_cur == 4 and state_prev == 3:
+        elif self.cur_state == 4 and self.prev_state == 3:
             if is_long:
                 notify_event(f"4️⃣ ✅ <b>Condition 4 matched</b>: Stochastic K ({stoch_k_cur}) crossed above D ({stoch_d_cur}) and D is below 50, confirming bullish momentum.")
             elif is_short:
                 notify_event(f"4️⃣ ✅ <b>Condition 4 matched</b>: Stochastic K ({stoch_k_cur}) crossed below D ({stoch_d_cur}) and D is above 50, confirming bearish momentum.")
 
-        elif state_cur == 3 and state_prev == 4:
+        elif self.cur_state == 3 and self.prev_state == 4:
             if is_long:
                 notify_event(f"4️⃣ ❌ <b>Condition 4 regressed</b>: Stochastic K ({stoch_k_cur}) is no longer above D ({stoch_d_cur}).")
             elif is_short:
                 notify_event(f"4️⃣ ❌ <b>Condition 4 regressed</b>: Stochastic K ({stoch_k_cur}) is no longer below D ({stoch_d_cur}).")
 
-        if should_enter:
-            t_open = last_condition_candle['time_open'].strftime('%H:%M')
-            t_close = last_condition_candle['time_close'].strftime('%H:%M')
+        if self.should_enter:
+            t_open = self.cur_condition_candle['time_open'].strftime('%H:%M')
+            t_close = self.cur_condition_candle['time_close'].strftime('%H:%M')
 
             trading_opportunity_message = (f"🚀 <b>Alert!</b> A new trading opportunity has been identified on frame {t_open} - {t_close}.\n\n"
                                            f"🔔 Would you like to confirm the placement of this order?\n\n"
                                            "Select an option to place the order or ignore this signal (by default, the signal will be <b>ignored</b> if no selection is made).")
-            reply_markup = self.get_signal_confirmation_dialog(last_condition_candle)
+            reply_markup = self.get_signal_confirmation_dialog(self.cur_condition_candle)
 
             self.send_message_with_details(trading_opportunity_message, reply_markup=reply_markup)
 
             dir_str = "long" if is_long else "short"
             cur_candle_time = f"{cur_candle['time_open'].strftime('%H:%M')} - {cur_candle['time_close'].strftime('%H:%M')}"
-            last_condition_candle_time = f"{last_condition_candle['time_open'].strftime('%H:%M')} - {last_condition_candle['time_close'].strftime('%H:%M')}"
+            last_condition_candle_time = f"{self.cur_condition_candle['time_open'].strftime('%H:%M')} - {self.cur_condition_candle['time_close'].strftime('%H:%M')}"
             notify_event(
                 f"5️⃣ ✅ <b>Condition 5 matched</b>: Final signal generated for {dir_str} trade. The current candle time {cur_candle_time} is from the candle following the last condition candle: {last_condition_candle_time}")
 
@@ -272,18 +268,16 @@ class Adrastea(TradingStrategy):
             log_debug("Checking for trading signals.")
             self.should_enter, self.prev_state, self.cur_state, self.prev_condition_candle, self.cur_condition_candle = self.check_signals(rates=candles,
                                                                                                                                            i=len(candles) - 1,
-                                                                                                                                           timeframe=timeframe,
-                                                                                                                                           symbol=symbol,
                                                                                                                                            trading_direction=trading_direction,
                                                                                                                                            state=self.cur_state,
-                                                                                                                                           last_condition_candle=self.cur_condition_candle)
+                                                                                                                                           cur_condition_candle=self.cur_condition_candle)
 
             log_debug(f"Checking signals - Results: should_enter={self.should_enter}, State={self.cur_state}, last_condition_candle={describe_candle(self.cur_condition_candle)}")
 
             last_candle_time_str = f"{last_candle['time_open'].strftime('%Y-%m-%d %H:%M:%S')} - {last_candle['time_close'].strftime('%Y-%m-%d %H:%M:%S')}"
             # log_candle(last_candle)
 
-            # notify_state_change(state_prev, state, candles, len(candles) - 1, params, last_condition_candle, should_enter)
+            self.notify_state_change(candles, len(candles) - 1)
 
             if self.should_enter:
                 log_debug("Condition satisfied for placing an order. Sending entry signal notification.")
@@ -498,15 +492,15 @@ class Adrastea(TradingStrategy):
         return confirmed
 
     @exception_handler
-    async def on_market_status_change(self, is_open: bool, closing_time: float, opening_time: float):
+    async def on_market_status_change(self, is_open: bool, closing_time: float, opening_time: float, initializing: bool):
         async with self.execution_lock:
             log_info(f"Stato del mercato cambiato: aperto={is_open}, chiusura={closing_time}, apertura={opening_time}")
             symbol = self.config.get_symbol()
             if is_open:
-                log_info(f"Market for {log_info} has opened.")
-                self.send_message_with_details(f"🔔 Market for {log_info} has just <b>opened</b>. Resuming trading activities.")
+                log_info(f"Market for {symbol} has opened.")
+                self.send_message_with_details(f"🔔 Market for {symbol} has just <b>opened</b>. Resuming trading activities.")
             else:
-                log_info(f"Market for {log_info} has closed.")
+                log_info(f"Market for {symbol} has closed.")
                 self.send_message_with_details(f"🔔 Market for {symbol} has just <b>closed</b>. Pausing trading activities.")
 
     @exception_handler
@@ -610,7 +604,14 @@ class Adrastea(TradingStrategy):
         else:  # Otherwise, assume it's a single number and round it directly
             return round(value, num_decimal_places)
 
-    def check_signals(self, rates: Series, i: int, timeframe: Timeframe, symbol: str, trading_direction: TradingDirection, state=None, last_condition_candle=None) -> (bool, int, int, Series):
+    def check_signals(
+            self,
+            rates: Series,
+            i: int,
+            trading_direction: TradingDirection,
+            state=None,
+            cur_condition_candle=None
+    ) -> (bool, int, int, Series):
         """
         Analyzes market conditions to determine the appropriateness of entering a trade based on a set of predefined rules.
 
@@ -619,173 +620,151 @@ class Adrastea(TradingStrategy):
         - i (int): The current index in the rates dictionary to check signals for. In live mode is always the last candle index.
         - params (dict): A dictionary containing parameters such as symbol, timeframe, and trading direction.
         - state (int, optional): The current state of the trading conditions, used for tracking across multiple calls. Defaults to None.
-        - last_condition_candle (Dataframe, optional): The last candle where a trading condition was met. Defaults to None.
+        - cur_condition_candle (Dataframe, optional): The last candle where a trading condition was met. Defaults to None.
         - notifications (bool, optional): Indicates whether to send notifications when conditions are met. Defaults to False.
 
         Returns:
         - should_enter (bool): Indicates whether the conditions suggest entering a trade.
-        - state_cur (int): The updated state after checking the current conditions.
-        - last_condition_candle (Dataframe): The candle where a trading condition was met.
-        - data (dict): A dictionary of the current rates and indicator values used for decision making.
-        - events (list): A list of log entries detailing which conditions were met or unmet.
+        - prev_state (int): The previous state before the current check.
+        - cur_state (int): The updated state after checking the current conditions.
+        - prev_condition_candle (Series): The candle where a trading condition was previously met.
+        - cur_condition_candle (Series): The candle where the latest trading condition was met.
 
         The function evaluates a series of trading conditions based on market direction (long or short), price movements, and indicators like Supertrend and Stochastic. It progresses through states as conditions are met, logging each step, and ultimately determines whether the strategy's criteria for entering a trade are satisfied.
         """
 
-        state_cur = 0 if state is None else state
-        state_prev = state_cur
-        prev_condition_candle = last_condition_candle
+        cur_state = state if state is not None else 0
+        prev_state = cur_state
+        prev_condition_candle = cur_condition_candle
         should_enter = False
-
         cur_candle = rates.iloc[i]
         close = cur_candle['HA_close']
-
-        supert_fast_prev = rates[supertrend_fast_key][i - 1]
-        supert_slow_prev = rates[supertrend_slow_key][i - 1]
+        supert_fast_prev, supert_slow_prev = rates[supertrend_fast_key][i - 1], rates[supertrend_slow_key][i - 1]
         supert_fast_cur = rates[supertrend_fast_key][i]
-        stoch_k_cur = rates[stoch_k_key][i]
-        stoch_d_cur = rates[stoch_d_key][i]
-
-        is_long = trading_direction == TradingDirection.LONG
-        is_short = trading_direction == TradingDirection.SHORT
-
-        # The conversion of the timestamp to an integer must be done dynamically because it can change following a state transition.
-        # Therefore, it is necessary that the comparison is always made with the updated timestamp variable to avoid incorrectly verifying certain conditions.
-        def int_time_open(candle: Series):
-            return -1 if candle is None else int(candle['time_open'].timestamp())
-
-        def int_time_close(candle: Series):
-            return -1 if candle is None else int(candle['time_close'].timestamp())
-
-        # Condition 1 must always be checked in every iteration and must be valid. If it is no longer valid, the process should not continue.
+        stoch_k_cur, stoch_d_cur = rates[stoch_k_key][i], rates[stoch_d_key][i]
+        is_long, is_short = trading_direction == TradingDirection.LONG, trading_direction == TradingDirection.SHORT
+        int_time_open = lambda candle: -1 if candle is None else int(candle['time_open'].timestamp())
+        int_time_close = lambda candle: -1 if candle is None else int(candle['time_close'].timestamp())
 
         # Condition 1
-        can_check_condition_1 = state_cur >= 0 and int_time_open(cur_candle) >= int_time_open(last_condition_candle)
-        log_debug(f"Can check condition 1: {can_check_condition_1}")
-        if can_check_condition_1:
-            log_debug(f"Before evaluating condition 1: state_cur={state_cur}, last_condition_candle={describe_candle(last_condition_candle)}")
-            condition_1_met = (is_long and close >= supert_slow_prev) or (is_short and close < supert_slow_prev)
-            if condition_1_met:
-                if state_cur == 0:  # log only if is the first time
-                    state_prev, state_cur, prev_condition_candle, last_condition_candle = self.update_state(cur_candle, prev_condition_candle, last_condition_candle, 1, state_cur)
-            else:
-                if state_cur >= 1:  # regress only if the condition has already been met
-                    state_prev, state_cur, prev_condition_candle, last_condition_candle = self.update_state(cur_candle, prev_condition_candle, last_condition_candle, 0, state_cur)
-            log_debug(f"After evaluating condition 1: state_cur={state_cur}, last_condition_candle={describe_candle(last_condition_candle)}")
+        can_check_1 = cur_state >= 0 and int_time_open(cur_candle) >= int_time_open(cur_condition_candle)
+        log_debug(f"Can check condition 1: {can_check_1}")
+        if can_check_1:
+            log_debug(f"Before evaluating condition 1: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
+            cond1 = (is_long and close >= supert_slow_prev) or (is_short and close < supert_slow_prev)
+            if cond1:
+                if cur_state == 0:
+                    prev_state, cur_state, prev_condition_candle, cur_condition_candle = self.update_state(cur_candle, prev_condition_candle, cur_condition_candle, 1, cur_state)
+            elif cur_state >= 1:
+                prev_state, cur_state, prev_condition_candle, cur_condition_candle = self.update_state(cur_candle, prev_condition_candle, cur_condition_candle, 0, cur_state)
+            log_debug(f"After evaluating condition 1: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
 
         # Condition 2
-        can_check_condition_2 = state_cur >= 1 and int_time_open(cur_candle) > int_time_open(last_condition_candle)
-        log_debug(f"Can check condition 2: {can_check_condition_2}")
-        if can_check_condition_2:
-            log_debug(f"Before evaluating condition 2: state_cur={state_cur}, last_condition_candle={describe_candle(last_condition_candle)}")
-            condition_2_met = (is_long and close <= supert_fast_cur) or (is_short and close > supert_fast_cur)
-            if condition_2_met:
-                if state_cur == 1:  # notify only if the condition has already been met
-                    state_prev, state_cur, prev_condition_candle, last_condition_candle = self.update_state(cur_candle, prev_condition_candle, last_condition_candle, 2, state_cur)
-            log_debug(f"After evaluating condition 2: state_cur={state_cur}, last_condition_candle={describe_candle(last_condition_candle)}")
+        can_check_2 = cur_state >= 1 and int_time_open(cur_candle) > int_time_open(cur_condition_candle)
+        log_debug(f"Can check condition 2: {can_check_2}")
+        if can_check_2:
+            log_debug(f"Before evaluating condition 2: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
+            cond2 = (is_long and close <= supert_fast_cur) or (is_short and close > supert_fast_cur)
+            if cond2 and cur_state == 1:
+                prev_state, cur_state, prev_condition_candle, cur_condition_candle = self.update_state(cur_candle, prev_condition_candle, cur_condition_candle, 2, cur_state)
+            log_debug(f"After evaluating condition 2: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
 
         # Condition 3
-        can_check_condition_3 = state_cur >= 2 and int_time_open(cur_candle) >= int_time_open(last_condition_candle)
-        log_debug(f"Can check condition 3: {can_check_condition_3}")
-        if can_check_condition_3:
-            log_debug(f"Before evaluating condition 3: state_cur={state_cur}, last_condition_candle={describe_candle(last_condition_candle)}")
-            condition_3_met = (is_long and close >= supert_fast_prev) or (is_short and close < supert_fast_prev)
-            if condition_3_met:
-                if state_cur == 2:  # log only if is the first time
-                    state_prev, state_cur, prev_condition_candle, last_condition_candle = self.update_state(cur_candle, prev_condition_candle, last_condition_candle, 3, state_cur)
-            else:
-                if state_cur >= 3:  # regress only if the condition has already been met
-                    if is_long:
-                        state_prev, state_cur, prev_condition_candle, last_condition_candle = self.update_state(cur_candle, prev_condition_candle, last_condition_candle, 2, state_cur)
-            log_debug(f"After evaluating condition 3: state_cur={state_cur}, last_condition_candle={describe_candle(last_condition_candle)}")
+        can_check_3 = cur_state >= 2 and int_time_open(cur_candle) >= int_time_open(cur_condition_candle)
+        log_debug(f"Can check condition 3: {can_check_3}")
+        if can_check_3:
+            log_debug(f"Before evaluating condition 3: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
+            cond3 = (is_long and close >= supert_fast_prev) or (is_short and close < supert_fast_prev)
+            if cond3:
+                if cur_state == 2:
+                    prev_state, cur_state, prev_condition_candle, cur_condition_candle = self.update_state(cur_candle, prev_condition_candle, cur_condition_candle, 3, cur_state)
+            elif cur_state >= 3:
+                prev_state, cur_state, prev_condition_candle, cur_condition_candle = self.update_state(cur_candle, prev_condition_candle, cur_condition_candle, 2, cur_state)
+            log_debug(f"After evaluating condition 3: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
 
         # Condition 4 (Stochastic)
-        can_check_condition_4 = state_cur >= 3
-        log_debug(f"Can check condition 4: {can_check_condition_4}")
-        if can_check_condition_4:
-            log_debug(f"Before evaluating condition 4: state_cur={state_cur}, last_condition_candle={describe_candle(last_condition_candle)}")
-            condition_4_met = ((is_long and stoch_k_cur > stoch_d_cur and stoch_d_cur < 50) or (is_short and stoch_k_cur < stoch_d_cur and stoch_d_cur > 50))
-            if condition_4_met:
-                if state_cur == 3:  # notify only if the condition has already been met
-                    state_prev, state_cur, prev_condition_candle, last_condition_candle = self.update_state(cur_candle, prev_condition_candle, last_condition_candle, 4, state_cur)
-            log_debug(f"After evaluating condition 4: state_cur={state_cur}, last_condition_candle={describe_candle(last_condition_candle)}")
+        can_check_4 = cur_state >= 3
+        log_debug(f"Can check condition 4: {can_check_4}")
+        if can_check_4:
+            log_debug(f"Before evaluating condition 4: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
+            cond4 = (is_long and stoch_k_cur > stoch_d_cur and stoch_d_cur < 50) or (is_short and stoch_k_cur < stoch_d_cur and stoch_d_cur > 50)
+            if cond4 and cur_state == 3:
+                prev_state, cur_state, prev_condition_candle, cur_condition_candle = self.update_state(cur_candle, prev_condition_candle, cur_condition_candle, 4, cur_state)
+            log_debug(f"After evaluating condition 4: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
 
         # Condition 5 (Final condition for entry)
         time_tolerance = 30
-        # Check if state is 4 and cur_candle is indeed the candle right after last_condition_candle
-        can_check_condition_5 = (
-                state_cur == 4 and
-                int(cur_candle['time_open'].timestamp()) > int(last_condition_candle['time_open'].timestamp())
-        )
-        log_debug(f"Can check condition 5: {can_check_condition_5}")
-        if can_check_condition_5:
-            # Verify that the current candle is exactly the one after the last condition 4 candle, with a tolerance margin between the expected time and a small delay.
-            lower_bound = int_time_close(last_condition_candle)
-            upper_bound = lower_bound + time_tolerance
-            condition_5_met = lower_bound <= int_time_open(cur_candle) <= upper_bound
-            log_debug(f"Lower Bound: {lower_bound}, Upper Bound: {upper_bound}, Current Candle Time: {int_time_open(cur_candle)}")
-            # For testing purposes: If you want to trigger an entry signal every time the bot is launched after condition 4 has been matched and is still active, simply uncomment the following line.
-            # condition_5_met = to_int(cur_candle_time) >= lower_bound
-            if condition_5_met:
-                log_debug(f"Before evaluating condition 5: state_cur={state_cur}, last_condition_candle={describe_candle(last_condition_candle)}")
-                state_prev, state_cur, prev_condition_candle, last_condition_candle = self.update_state(cur_candle, prev_condition_candle, last_condition_candle, 5, state_cur)
+        can_check_5 = cur_state == 4 and int(cur_candle['time_open'].timestamp()) > int(cur_condition_candle['time_open'].timestamp())
+        log_debug(f"Can check condition 5: {can_check_5}")
+        if can_check_5:
+            lower, upper = int_time_close(cur_condition_candle), int_time_close(cur_condition_candle) + time_tolerance
+            cond5 = lower <= int_time_open(cur_candle) <= upper
+            log_debug(f"Lower Bound: {lower}, Upper Bound: {upper}, Current Candle Time: {int_time_open(cur_candle)}")
+            # condition_5_met = to_int(cur_candle_time) >= lower_bound  # Uncomment for testing
+            if cond5:
+                log_debug(f"Before evaluating condition 5: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
+                prev_state, cur_state, prev_condition_candle, cur_condition_candle = self.update_state(cur_candle, prev_condition_candle, cur_condition_candle, 5, cur_state)
                 should_enter = True
-            log_debug(f"After evaluating condition 5: state_cur={state_cur}, last_condition_candle={describe_candle(last_condition_candle)}")
+            log_debug(f"After evaluating condition 5: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
 
-        log_debug(f"Returning: should_enter={should_enter}, state_cur={state_cur}, last_condition_candle={describe_candle(last_condition_candle)}")
-        return should_enter, state_prev, state_cur, prev_condition_candle, last_condition_candle
+        log_debug(f"Returning: should_enter={should_enter}, prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
+        return should_enter, prev_state, cur_state, prev_condition_candle, cur_condition_candle
 
-    def update_state(self, cur_candle: Series, prev_condition_candle: Series, last_condition_candle: Series, new_state: int, old_state: int) -> (bool, int, Series):
+    def update_state(
+            self,
+            cur_candle: Series,
+            prev_condition_candle: Optional[Series],
+            cur_condition_candle: Optional[Series],
+            cur_state: int,
+            prev_state: int
+    ) -> Tuple[int, int, Optional[Series], Optional[Series]]:
         """
-        Updates the state and the last condition-matching candle time based on the current time,
-        the previous condition-matching candle time, the new state, and the old state.
+        Updates the state and the last candle that met the condition.
 
         Args:
             cur_candle (Series): The current candle.
-            last_condition_candle (Series): The last condition-matching candle.
-            new_state (int): The new state to be updated.
-            old_state (int): The previous state.
+            prev_condition_candle (Optional[Series]): The previous condition-matching candle.
+            cur_condition_candle (Optional[Series]): The last candle that meets the condition.
+            cur_state (int): The current new state.
+            prev_state (int): The previous old state.
 
         Raises:
-            ValueError: If cur_time is unexpectedly earlier than the last condition candle open time.
+            ValueError: If the current candle time is earlier than the last condition-matching candle time.
 
         Returns:
-            tuple: A tuple containing the previous state (int), the updated state (int),
-                   and the last condition-matching candle time (Timestamp).
+            Tuple[int, int, Optional[Series], Optional[Series]]: (previous state, new state, previous condition candle, updated condition candle)
         """
 
-        # Retain the highest state as the most recent condition met.
-        ret_state = old_state
-        if new_state != old_state:
-            # Log a state change if there's a transition.
-            log_debug(f"State change from {old_state} -> {new_state}")
-            ret_state = new_state
+        ret_state = cur_state if cur_state != prev_state else prev_state
 
-        cur_candle_time_int = int(cur_candle['time_open'].timestamp())
-        last_condition_candle_time = None if last_condition_candle is None else last_condition_candle['time_open']
-        last_condition_candle_time_int = -1 if last_condition_candle_time is None else int(last_condition_candle_time.timestamp())
+        log_debug(f"Changing state from {prev_state} to {cur_state}")
 
-        # Raise an exception if cur_candle is unexpectedly earlier than last_condition_candle.
-        if last_condition_candle_time_int is not None and cur_candle_time_int < last_condition_candle_time_int:
-            raise ValueError(f"Strategy current candle time {cur_candle['time_open']} cannot be prior to last condition-matching "
-                             f"candle time {last_condition_candle['time_open']}.")
+        cur_time_unix = dt_to_unix(cur_candle['time_open'])
+        cur_condition_time_unix = dt_to_unix(cur_condition_candle['time_open']) if cur_condition_candle is not None else None
 
-        # Only update last_condition_candle for first-time matches in new candles,
-        # avoiding unnecessary updates when conditions reconfirm without new occurrences.
-        ret_candle = last_condition_candle
+        if cur_condition_time_unix and cur_time_unix < cur_condition_time_unix:
+            raise ValueError(
+                f"Strategy current candle time {cur_candle['time_open']} cannot be prior to last condition-matching "
+                f"candle time {cur_condition_candle['time_open']}."
+            )
 
-        # Update last_condition_candle whenever there is a state change, regardless of whether it's on the same candle or a different candle.
-        if new_state != old_state:
-            # Log candle index update for new condition matches.
-            log_debug(f"Strategy candle time change from {last_condition_candle_time} -> {cur_candle['time_open']}")
-            ret_candle = cur_candle
-            prev_condition_candle = last_condition_candle
+        if cur_state != prev_state:
+            if cur_state == 0:
+                log_debug("State changed to 0. Resetting cur_condition_candle.")
+                updated_candle = None
+            else:
+                prev_time = cur_condition_candle['time_open'] if cur_condition_candle is not None else None
+                log_debug(f"Strategy candle time change from {prev_time} -> {cur_candle['time_open']}")
+                updated_candle = cur_candle
+            prev_condition_candle = cur_condition_candle
         else:
             log_debug(
-                f"update_state function called but no state change detected. Current state remains {new_state}. Called with candle time {cur_candle['time_open']}. Previous state was {old_state}.")
+                f"update_state called but no state change detected. Current state remains {cur_state}. "
+                f"Called with candle time {cur_candle['time_open']}. Previous state was {prev_state}."
+            )
+            updated_candle = cur_condition_candle
 
-        # Returns the previous state, current updated state, and the last condition-matching candle index.
-        return old_state, ret_state, prev_condition_candle, ret_candle
+        return prev_state, ret_state, prev_condition_candle, updated_candle
 
     def send_message(self, message, level=NotificationLevel.DEFAULT, reply_markup=None):
         config = ConfigReader()

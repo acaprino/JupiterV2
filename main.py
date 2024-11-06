@@ -19,56 +19,56 @@ from utils.async_executor import executor
 
 async def main(config_file: str):
     """
-    Funzione principale che avvia il bot di trading asincrono.
+    Main function that starts the asynchronous trading bot.
     """
     config = ConfigReader(config_file)
 
-    # Configura il logging
+    # Configure logging
     warnings.filterwarnings('ignore', category=FutureWarning)
     log_init(config.get_bot_name(), config.get_bot_version(), config.get_bot_logging_level())
 
-    # Inizializza il broker
+    # Initialize the broker
     broker: BrokerAPI = MT5Broker(config)
 
-    # Crea il lock per sincronizzare le esecuzioni
+    # Create the lock to synchronize executions
     execution_lock = asyncio.Lock()
 
-    # Inizializza il MarketStateNotifier
+    # Initialize the MarketStateNotifier
     market_state_notifier = MarketStateNotifier(broker, config.get_symbol(), execution_lock)
     candle_provider = CandleProvider(broker, symbol=config.get_symbol(), timeframe=config.get_timeframe(), execution_lock=execution_lock)
     economic_event_notifier = EconomicEventNotifier(broker, config.get_symbol(), execution_lock)
     closed_deals_notifier = ClosedDealsNotifier(broker, config.get_symbol(), execution_lock)
 
-    # Istanzia la strategia
+    # Instantiate the strategy
     strategy = Adrastea(broker, config, market_state_notifier, candle_provider)
 
-    # Registra gli handler degli eventi
+    # Register event handlers
     candle_provider.register_on_new_candle(strategy.on_new_candle)
     market_state_notifier.register_on_market_status_change(strategy.on_market_status_change)
     economic_event_notifier.register_on_economic_event(strategy.on_economic_event)
     closed_deals_notifier.register_on_deal_status_notifier(strategy.on_deal_closed)
 
-    # Esegui il metodo di bootstrap della strategia
+    # Execute the strategy bootstrap method
     await strategy.bootstrap()
     await market_state_notifier.start()
     await candle_provider.start()
-    await economic_event_notifier.start()
-    await closed_deals_notifier.start()
+    #await economic_event_notifier.start()
+    #await closed_deals_notifier.start()
 
     try:
-        # Mantieni il programma in esecuzione
+        # Keep the program running
         while True:
             await asyncio.sleep(1)
     except KeyboardInterrupt:
-        log_info("Interruzione da tastiera rilevata. Arresto del bot...")
+        log_info("Keyboard interruption detected. Stopping the bot...")
     finally:
-        # Arresta i provider e chiudi la connessione broker
+        # Stop the providers and close the broker connection
         await candle_provider.stop()
         await market_state_notifier.stop()
         await economic_event_notifier.stop()
         await closed_deals_notifier.stop()
         broker.shutdown()
-        log_info("Programma terminato.")
+        log_info("Program terminated.")
 
         executor.shutdown()
 

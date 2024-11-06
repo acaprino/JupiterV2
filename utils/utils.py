@@ -21,7 +21,9 @@ def now_utc() -> datetime:
 
 
 def dt_to_unix(dt) -> float:
-    if dt.tzinfo is None:
+    if dt is None:
+        return -1
+    elif dt.tzinfo is None:
         # Datetime naive: interpretato come UTC
         return calendar.timegm(dt.timetuple())
     else:

@@ -27,7 +27,7 @@ class TradingStrategy(ABC):
         pass
 
     @abstractmethod
-    async def on_market_status_change(self, is_open: bool, closing_time: Optional[float], opening_time: Optional[float]):
+    async def on_market_status_change(self, is_open: bool, closing_time: Optional[float], opening_time: Optional[float], initializing: Optional[bool]):
         """
         Metodo chiamato quando lo stato del mercato cambia.
         """

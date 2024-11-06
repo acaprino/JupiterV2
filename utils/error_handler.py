@@ -1,17 +1,17 @@
 # utils/error_handler.py
 
-import logging
 from functools import wraps
+from typing import Callable, Awaitable
 
-def exception_handler(coroutine_func):
-    """
-    Decoratore per gestire le eccezioni nelle coroutine.
-    """
+from utils.logger import log_error
 
-    @wraps(coroutine_func)
+
+def exception_handler(func: Callable[..., Awaitable[None]]) -> Callable[..., Awaitable[None]]:
+    @wraps(func)
     async def wrapper(*args, **kwargs):
         try:
-            return await coroutine_func(*args, **kwargs)
+            await func(*args, **kwargs)
         except Exception as e:
-            logging.error(f"Errore in {coroutine_func.__name__}: {e}", exc_info=True)
+            log_error(f"Exception in {func.__name__}: {e}")
+            # Puoi aggiungere altre azioni, come notifiche
     return wrapper

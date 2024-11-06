@@ -3,42 +3,42 @@
 import asyncio
 import logging
 import time
-from typing import Callable, Awaitable, List, Optional
+from typing import Callable, Awaitable, List, Optional, Tuple
 
 from brokers.broker_interface import BrokerAPI
 from utils.async_executor import execute_broker_call
-from utils.error_handler import exception_handler
 from utils.logger import log_info
 
 
 class MarketStateNotifier:
     """
-    Monitora lo stato del mercato (aperto/chiuso) per un simbolo specificato e attiva i callback registrati quando lo stato cambia.
+    Monitors the market state (open/closed) for a specified symbol and triggers registered callbacks when the state changes.
     """
 
     def __init__(self, broker: BrokerAPI, symbol: str, execution_lock: asyncio.Lock = None):
         self.broker = broker
         self.symbol = symbol
-        self._market_open = False
+        self._market_open: Optional[bool] = None  # Initialize as None to represent unknown state
         self._running = False
         self._task = None
-        self._on_market_status_change_callbacks: List[Callable[[bool, Optional[float], Optional[float]], Awaitable[None]]] = []
-        self._market_closed_time = None
-        self._market_opened_time = None
-        self.execution_lock = execution_lock  # Lock per sincronizzare le esecuzioni
+        self._on_market_status_change_callbacks: List[Callable[[bool, Optional[float], Optional[float], Optional[bool]], Awaitable[None]]] = []
+        self._market_closed_time: Optional[float] = None
+        self._market_opened_time: Optional[float] = None
+        self.execution_lock = execution_lock  # Lock to synchronize executions
+        self._initialized = False  # Flag to track initial notification
 
     async def start(self):
         """
-        Avvia il notifier dello stato del mercato.
+        Starts the market state notifier.
         """
         if not self._running:
             self._running = True
             self._task = asyncio.create_task(self._run())
-            log_info(f"Market state notifier per {self.symbol} avviato.")
+            log_info(f"Market state notifier for {self.symbol} started.")
 
     async def stop(self):
         """
-        Arresta il notifier dello stato del mercato.
+        Stops the market state notifier.
         """
         if self._running:
             self._running = False
@@ -48,47 +48,68 @@ class MarketStateNotifier:
                     await self._task
                 except asyncio.CancelledError:
                     pass
-            log_info(f"Market state notifier per {self.symbol} fermato.")
+            log_info(f"Market state notifier for {self.symbol} stopped.")
 
-    def register_on_market_status_change(self, callback: Callable[[bool, Optional[float], Optional[float]], Awaitable[None]]):
+    def register_on_market_status_change(
+            self,
+            callback: Callable[[bool, Optional[float], Optional[float], Optional[bool]], Awaitable[None]]
+    ):
         """
-        Registra una funzione di callback da chiamare quando lo stato del mercato cambia.
+        Registers a callback function to be called when the market state changes.
         """
         if not callable(callback):
-            raise ValueError("Il callback deve essere callable")
+            raise ValueError("Callback must be callable")
         self._on_market_status_change_callbacks.append(callback)
+
+    async def _update_market_state(self, market_is_open: bool, initializing: bool = False):
+        current_time = time.time()
+
+        if initializing:
+            if market_is_open:
+                self._market_opened_time = current_time
+                self._market_closed_time = None
+                log_info(f"The market for {self.symbol} is currently OPEN.")
+            else:
+                self._market_closed_time = current_time
+                self._market_opened_time = None
+                log_info(f"The market for {self.symbol} is currently CLOSED.")
+        else:
+            if market_is_open:
+                self._market_opened_time = current_time
+                self._market_closed_time = None
+                log_info(f"The market for {self.symbol} is now OPEN.")
+            else:
+                self._market_closed_time = current_time
+                self._market_opened_time = None
+                log_info(f"The market for {self.symbol} is now CLOSED.")
+
+        self._market_open = market_is_open
+
+        # Trigger callbacks with the current state
+        tasks = [
+            callback(self._market_open, self._market_closed_time, self._market_opened_time, initializing)
+            for callback in self._on_market_status_change_callbacks
+        ]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _run(self):
         while self._running:
             try:
+                # Recupera lo stato attuale del mercato
                 market_is_open = await execute_broker_call(self.broker.get_market_status, self.symbol)
-                if market_is_open != self._market_open:
-                    previous_state = self._market_open
-                    self._market_open = market_is_open
 
-                    closing_time = None
-                    opening_time = None
+                if not self._initialized:
+                    # Aggiorna lo stato iniziale e invoca le callback
+                    await self._update_market_state(market_is_open, initializing=True)
+                    self._initialized = True
+                else:
+                    if market_is_open != self._market_open:
+                        # Aggiorna lo stato e invoca le callback in caso di cambiamento
+                        await self._update_market_state(market_is_open, initializing=False)
 
-                    if self._market_open:
-                        self._market_opened_time = time.time()
-                        opening_time = self._market_opened_time
-                        if self._market_closed_time is not None:
-                            closing_time = self._market_closed_time
-                            self._market_closed_time = None
-                    else:
-                        self._market_closed_time = time.time()
-                        closing_time = self._market_closed_time
-                        self._market_opened_time = None
-
-                    state_str = "OPEN" if self._market_open else "CLOSED"
-                    log_info(f"Il mercato per {self.symbol} è ora {state_str}.")
-
-                    # Trigger dei callback in modo sincronizzato
-                    tasks = [
-                        callback(self._market_open, closing_time, opening_time)
-                        for callback in self._on_market_status_change_callbacks
-                    ]
-                    await asyncio.gather(*tasks, return_exceptions=True)
+                # Attendi prima del prossimo controllo
+                await asyncio.sleep(5)  # Controlla lo stato del mercato ogni 5 secondi
             except Exception as e:
-                logging.error(f"Errore in MarketStateNotifier._run: {e}", exc_info=True)
-            await asyncio.sleep(1)  # Controlla lo stato del mercato ogni secondo
+                logging.error(f"Error in MarketStateNotifier._run: {e}", exc_info=True)
+                await asyncio.sleep(5)  # Prevenire un loop stretto in caso di errori persistenti

@@ -14,30 +14,30 @@ from utils.logger import log_info
 
 class CandleProvider:
     """
-    Fornisce le nuove candele a intervalli regolari e attiva i callback registrati.
+    Provides new candles at regular intervals and triggers registered callbacks.
     """
 
     def __init__(self, broker: BrokerAPI, symbol: str, timeframe: Timeframe, execution_lock: asyncio.Lock = None):
         self.broker = broker
         self.symbol = symbol
-        self.timeframe = timeframe  # Timeframe in minuti
+        self.timeframe = timeframe  # Timeframe in minutes
         self._running = False
         self._task = None
         self._on_new_candle_callbacks: List[Callable[[dict], Awaitable[None]]] = []
-        self.execution_lock = execution_lock  # Lock per sincronizzare le esecuzioni
+        self.execution_lock = execution_lock  # Lock to synchronize executions
 
     async def start(self):
         """
-        Avvia il provider di candele.
+        Starts the candle provider.
         """
         if not self._running:
             self._running = True
             self._task = asyncio.create_task(self._run())
-            log_info(f"Candle provider per {self.symbol} avviato.")
+            log_info(f"Candle provider for {self.symbol} started.")
 
     async def stop(self):
         """
-        Arresta il provider di candele.
+        Stops the candle provider.
         """
         if self._running:
             self._running = False
@@ -47,14 +47,14 @@ class CandleProvider:
                     await self._task
                 except asyncio.CancelledError:
                     pass
-            log_info(f"Candle provider per {self.symbol} fermato.")
+            log_info(f"Candle provider for {self.symbol} stopped.")
 
     def register_on_new_candle(self, callback: Callable[[dict], Awaitable[None]]):
         """
-        Registra una funzione di callback da chiamare quando una nuova candela è disponibile.
+        Registers a callback function to be called when a new candle is available.
         """
         if not callable(callback):
-            raise ValueError("Il callback deve essere callable")
+            raise ValueError("Callback must be callable")
         self._on_new_candle_callbacks.append(callback)
 
     async def _run(self):
@@ -62,20 +62,20 @@ class CandleProvider:
             try:
                 await self.wait_next_tick()
                 candle = await self._fetch_candle()
-                log_info(f"Nuova candela per {self.symbol}: {candle}")
-                # Trigger dei callback in modo sincronizzato
+                log_info(f"New candle for {self.symbol}: {candle}")
+                # Trigger callbacks in a synchronized manner
                 tasks = [callback(candle) for callback in self._on_new_candle_callbacks]
                 await asyncio.gather(*tasks, return_exceptions=True)
             except Exception as e:
-                logging.error(f"Errore in CandleProvider._run: {e}", exc_info=True)
-             # Attendi 60 secondi prima di recuperare la prossima candela
+                logging.error(f"Error in CandleProvider._run: {e}", exc_info=True)
+             # Wait 60 seconds before fetching the next candle
 
     async def _fetch_candle(self) -> dict:
         candles = await execute_broker_call(self.broker.get_last_candles, self.symbol, self.timeframe, 1)
         if candles:
             return candles[0]
         else:
-            raise Exception("Errore nel recupero della candela")
+            raise Exception("Error fetching the candle")
 
     async def wait_next_tick(self):
         timeframe_duration = self.timeframe.to_seconds()

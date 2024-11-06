@@ -4,7 +4,7 @@ from utils.utils import now_utc
 
 class StrategyEventsLogger(CSVLogger):
 
-    def __init__(self, symbol, timeframe, trading_direction, bot_mode):
+    def __init__(self, symbol, timeframe, trading_direction):
         timeframe = timeframe.name
         trading_direction = trading_direction.name
         output_path = f"{symbol}/{timeframe}/{trading_direction}"

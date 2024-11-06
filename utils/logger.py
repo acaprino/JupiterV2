@@ -14,21 +14,25 @@ def log_init(bot_name, bot_version, level):
     log_level_num = getattr(logging, level)
     logger.setLevel(log_level_num)
     handler = RotatingFileHandler(f"logs/{bot_name}_{bot_version}.log", maxBytes=10 * 1024 * 1024, backupCount=50, encoding='utf-8')
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     logger.propagate = False
 
 
 def _log(level, msg, exc_info=False):
+    # Retrieve the frame two levels up in the stack
     frame = inspect.stack()[2]
     full_path = frame.filename
     relative_path = os.path.relpath(full_path)
     func_name = frame.function
+    line_no = frame.lineno  # Get the line number
 
-    log_message = f'{relative_path} - {func_name} - {msg}'
+    # Construct the log message including the line number
+    log_message = f'{relative_path}:{line_no} - {func_name} - {msg}'
+
+    # Call the appropriate logging method
     getattr(logger, level)(log_message, exc_info=exc_info)
-
 
 def warning(msg):
     _log('warning', msg)
