@@ -6,6 +6,7 @@ import warnings
 
 from brokers.broker_interface import BrokerAPI
 from providers.candle_provider import CandleProvider
+from providers.deal_status_notifier import ClosedDealsNotifier
 from providers.economic_event_notifier import EconomicEventNotifier
 from providers.market_state_notifier import MarketStateNotifier
 from strategies.adrastea import Adrastea
@@ -14,6 +15,7 @@ from utils.config import ConfigReader
 from utils.logger import log_init, log_info
 
 from utils.async_executor import executor
+
 
 async def main(config_file: str):
     """
@@ -33,15 +35,9 @@ async def main(config_file: str):
 
     # Inizializza il MarketStateNotifier
     market_state_notifier = MarketStateNotifier(broker, config.get_symbol(), execution_lock)
-    await market_state_notifier.start()
-
-    # Inizializza il CandleProvider con lo stesso simbolo
     candle_provider = CandleProvider(broker, symbol=config.get_symbol(), timeframe=config.get_timeframe(), execution_lock=execution_lock)
-    await candle_provider.start()
-
-    # Inizializza il EconomicEventNotifier con lo stesso simbolo
     economic_event_notifier = EconomicEventNotifier(broker, config.get_symbol(), execution_lock)
-    await economic_event_notifier.start()
+    closed_deals_notifier = ClosedDealsNotifier(broker, config.get_symbol(), execution_lock)
 
     # Istanzia la strategia
     strategy = Adrastea(broker, config, market_state_notifier, candle_provider)
@@ -50,9 +46,14 @@ async def main(config_file: str):
     candle_provider.register_on_new_candle(strategy.on_new_candle)
     market_state_notifier.register_on_market_status_change(strategy.on_market_status_change)
     economic_event_notifier.register_on_economic_event(strategy.on_economic_event)
+    closed_deals_notifier.register_on_deal_status_notifier(strategy.on_deal_closed)
 
     # Esegui il metodo di bootstrap della strategia
     await strategy.bootstrap()
+    await market_state_notifier.start()
+    await candle_provider.start()
+    await economic_event_notifier.start()
+    await closed_deals_notifier.start()
 
     try:
         # Mantieni il programma in esecuzione
@@ -65,10 +66,12 @@ async def main(config_file: str):
         await candle_provider.stop()
         await market_state_notifier.stop()
         await economic_event_notifier.stop()
+        await closed_deals_notifier.stop()
         broker.shutdown()
         log_info("Programma terminato.")
 
         executor.shutdown()
+
 
 if __name__ == "__main__":
     sys.stdin.reconfigure(encoding='utf-8')

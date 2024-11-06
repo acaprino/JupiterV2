@@ -510,7 +510,7 @@ class Adrastea(TradingStrategy):
                 self.send_message_with_details(f"🔔 Market for {symbol} has just <b>closed</b>. Pausing trading activities.")
 
     @exception_handler
-    async def on_deal_closed(self, deal_info: dict):
+    async def on_deal_closed(self, deal_info: Position):
         async with self.execution_lock:
             log_info(f"Deal chiuso: {deal_info}")
 
