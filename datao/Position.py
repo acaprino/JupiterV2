@@ -23,3 +23,4 @@ class Position:
     symbol: str
     comment: str
     external_id: str
+    position_id: int

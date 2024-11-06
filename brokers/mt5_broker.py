@@ -1,7 +1,8 @@
 import math
 import threading
+from collections import defaultdict
 from datetime import timedelta, datetime, timezone
-from typing import Any, Optional, List
+from typing import Any, Optional, List, Dict
 
 import MetaTrader5 as mt5
 import pandas as pd
@@ -347,3 +348,46 @@ class MT5Broker(BrokerAPI):
             log_error(f"Error closing position {position.ticket}, error code = {result.retcode}, message = {result.comment}")
 
         return req_result
+
+    def get_deals(self, from_tms: datetime, to_tms: datetime, magic_number: Optional[int] = None, symbol: Optional[str] = None) -> Dict[int, List[Any]]:
+        from_unix = dt_to_unix(from_tms)
+        to_unix = dt_to_unix(to_tms)
+        closed_deals = mt5.history_deals_get(from_unix, to_unix, group=symbol)
+
+        filtered_deals = (
+            deal for deal in closed_deals
+            if (magic_number is None or deal.magic == magic_number)
+        )
+
+        positions: List[Position] = []
+
+        for deal in filtered_deals:
+            position = Position(
+                ticket=deal.ticket,
+                time=datetime.fromtimestamp(deal.time),
+                time_msc=deal.time_msc,
+                time_update=datetime.fromtimestamp(deal.time_update),
+                time_update_msc=deal.time_update_msc,
+                type=deal.type,
+                magic=deal.magic,
+                identifier=deal.identifier,
+                reason=deal.reason,
+                volume=deal.volume,
+                price_open=deal.price_open,
+                sl=deal.sl,
+                tp=deal.tp,
+                price_current=deal.price_current,
+                swap=deal.swap,
+                profit=deal.profit,
+                symbol=deal.symbol,
+                comment=deal.comment,
+                external_id=deal.external_id,
+                position_id=deal.position_id
+            )
+            positions.append(position)
+
+        deals_by_position = defaultdict(list)
+        for deal in filtered_deals:
+            deals_by_position[deal.position_id].append(deal)
+
+        return deals_by_position

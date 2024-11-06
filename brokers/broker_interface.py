@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Optional, List
+from datetime import datetime
+from typing import Optional, List, Dict
 
 from pandas import Series
 
@@ -60,4 +61,8 @@ class BrokerAPI(ABC):
 
     @abstractmethod
     def close_position(self, position: Position, comment: Optional[str] = None, magic_number: Optional[int] = None) -> RequestResult:
+        pass
+
+    @abstractmethod
+    def get_deals(self, from_tms: datetime, to_tms: datetime, magic_number: Optional[int] = None, symbol: Optional[str] = None) -> Dict[int, List[Position]]:
         pass

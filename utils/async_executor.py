@@ -3,10 +3,13 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
+from utils.error_handler import exception_handler
+
 # Esecutore per le chiamate bloccanti del broker
 executor = ThreadPoolExecutor(max_workers=5)
 
 
+@exception_handler
 async def execute_broker_call(func, *args, **kwargs):
     loop = asyncio.get_running_loop()
     try:

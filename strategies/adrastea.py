@@ -504,9 +504,36 @@ class Adrastea(TradingStrategy):
                 self.send_message_with_details(f"🔔 Market for {symbol} has just <b>closed</b>. Pausing trading activities.")
 
     @exception_handler
-    async def on_deal_closed(self, deal_info: Position):
+    async def on_deal_closed(self, position: Position):
         async with self.execution_lock:
-            log_info(f"Deal chiuso: {deal_info}")
+            log_info(f"Deal chiuso: {position}")
+
+            # Skip opening deals
+            if position.profit == 0:
+                log_info(f"Skipping open deal {position}.")
+                return
+
+            # Log the trade details
+            log_info(f"Trade closed:\n{position}")
+
+            # Determine emoji based on profit
+            emoji = "🤑" if position.profit > 0 else "😔"
+
+            # Formatta i dettagli del trade per la notifica
+            trade_details = (
+                f"<b>Position ID:</b> {position.ticket}\n"
+                f"<b>Timestamp:</b> {position.time.strftime('%d/%m/%Y %H:%M:%S')}\n"
+                f"<b>Symbol:</b> {position.symbol}\n"
+                f"<b>Volume:</b> {position.volume}\n"
+                f"<b>Price:</b> {position.price_open}\n"
+                f"<b>Stop Loss/Take Profit:</b> {'SL' if 'sl' in position.comment.lower() else 'TP'}\n"
+                f"<b>Profit:</b> {position.profit}\n"
+                f"<b>Commission:</b> {position.commission}\n"
+                f"<b>Swap:</b> {position.swap}"
+            )
+
+            # Invia notifica tramite Telegram
+            self.send_message_with_details(f"{emoji} <b>Deal closed</b>\n\n{trade_details}")
 
     @exception_handler
     async def on_economic_event(self, event_info: dict):

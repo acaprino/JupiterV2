@@ -1,17 +1,18 @@
 # utils/error_handler.py
 
 from functools import wraps
-from typing import Callable, Awaitable
+from typing import Callable, Awaitable, TypeVar, Optional
 
 from utils.logger import log_error
 
+R = TypeVar('R')
 
-def exception_handler(func: Callable[..., Awaitable[None]]) -> Callable[..., Awaitable[None]]:
+def exception_handler(func: Callable[..., Awaitable[R]]) -> Callable[..., Awaitable[R]]:
     @wraps(func)
-    async def wrapper(*args, **kwargs):
+    async def wrapper(*args, **kwargs) -> Optional[R]:
         try:
-            await func(*args, **kwargs)
+            return await func(*args, **kwargs)
         except Exception as e:
             log_error(f"Exception in {func.__name__}: {e}")
-            # Puoi aggiungere altre azioni, come notifiche
+            return None
     return wrapper

@@ -1,12 +1,12 @@
 # providers/market_state_notifier.py
 
 import asyncio
-import logging
 import time
 from typing import Callable, Awaitable, List, Optional, Tuple
 
 from brokers.broker_interface import BrokerAPI
 from utils.async_executor import execute_broker_call
+from utils.error_handler import exception_handler
 from utils.logger import log_info
 
 
@@ -93,6 +93,7 @@ class MarketStateNotifier:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
+    @exception_handler
     async def _run(self):
         while self._running:
             try:

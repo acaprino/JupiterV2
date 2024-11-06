@@ -15,6 +15,7 @@ from utils.config import ConfigReader
 from utils.logger import log_init, log_info
 
 from utils.async_executor import executor
+from utils.mongo_db import MongoDB
 
 
 async def main(config_file: str):
@@ -22,6 +23,7 @@ async def main(config_file: str):
     Main function that starts the asynchronous trading bot.
     """
     config = ConfigReader(config_file)
+    mongoDB = MongoDB(config_file)
 
     # Configure logging
     warnings.filterwarnings('ignore', category=FutureWarning)

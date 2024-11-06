@@ -9,6 +9,7 @@ from time import sleep, time
 from brokers.broker_interface import BrokerAPI
 from utils.async_executor import execute_broker_call
 from utils.enums import Timeframe
+from utils.error_handler import exception_handler
 from utils.logger import log_info
 
 
@@ -57,6 +58,7 @@ class CandleProvider:
             raise ValueError("Callback must be callable")
         self._on_new_candle_callbacks.append(callback)
 
+    @exception_handler
     async def _run(self):
         while self._running:
             try:

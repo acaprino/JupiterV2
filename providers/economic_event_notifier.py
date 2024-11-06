@@ -47,12 +47,12 @@ class EconomicEventNotifier:
         if not callable(callback):
             raise ValueError("Callback must be callable")
         self._on_economic_event_callbacks.append(callback)
-        log_debug(f"[EconomicEventNotifier] Callback registered: {callback}")
+        log_debug(f"Callback registered: {callback}")
 
     def unregister_on_economic_event(self, callback: Callable[[Dict], Awaitable[None]]):
         if callback in self._on_economic_event_callbacks:
             self._on_economic_event_callbacks.remove(callback)
-            log_debug(f"[EconomicEventNotifier] Callback unregistered: {callback}")
+            log_debug(f"Callback unregistered: {callback}")
 
     def get_next_run_time(self, now: datetime) -> datetime:
         interval_minutes = self.interval_seconds / 60
@@ -69,7 +69,7 @@ class EconomicEventNotifier:
             try:
                 is_market_open = await execute_broker_call(self.broker.get_market_status, self.symbol)
                 if not is_market_open:
-                    log_info(f"[EconomicEventNotifier] Market closed for {self.symbol}. Waiting for {self.interval_seconds / 60} minutes.")
+                    log_info(f"Market closed for {self.symbol}. Waiting for {self.interval_seconds / 60} minutes.")
                     await asyncio.sleep(self.interval_seconds)
                     continue
 
@@ -77,21 +77,21 @@ class EconomicEventNotifier:
 
                 # Calculate the next multiple of 5 minutes
                 next_run = self.get_next_run_time(now)
-                log_debug(f"[EconomicEventNotifier] Filtering events between {now} and {next_run}.")
+                log_debug(f"Filtering events between {now} and {next_run}.")
 
                 # Clean up expired events
                 self._cleanup_processed_events(now)
 
                 events = await self._load_events()
                 if not events:
-                    log_warning("[EconomicEventNotifier] No events loaded.")
+                    log_warning("No events loaded.")
                     # Calculate the time until the next multiple of 5 minutes
                     sleep_duration = (next_run - now).total_seconds()
                     await asyncio.sleep(max(sleep_duration, self.interval_seconds))
                     continue
 
                 countries = self.get_symbol_countries_of_interest(self.symbol)
-                log_debug(f"[EconomicEventNotifier] Countries of interest: {countries}")
+                log_debug(f"Countries of interest: {countries}")
 
                 # Filter events based on countries, importance, and time
                 filtered_events = [
@@ -101,22 +101,22 @@ class EconomicEventNotifier:
                        and now <= event.get('event_time') <= next_run
                        and event.get('event_id') not in self.processed_events
                 ]
-                log_debug(f"[EconomicEventNotifier] Filtered events: {filtered_events}")
+                log_debug(f"Filtered events: {filtered_events}")
 
                 if not filtered_events:
-                    log_debug("[EconomicEventNotifier] No events of interest found in this cycle.")
+                    log_debug("No events of interest found in this cycle.")
                 else:
                     for event in filtered_events:
                         await self._handle_event(event)
 
             except Exception as e:
-                log_error(f"[EconomicEventNotifier] Error while monitoring events: {str(e)}")
+                log_error(f"Error while monitoring events: {str(e)}")
 
             # Calculate the time until the next multiple of 5 minutes
             now = now_utc()
             next_run = self.get_next_run_time(now)
             sleep_duration = (next_run - now).total_seconds()
-            log_debug(f"[EconomicEventNotifier] Waiting for {sleep_duration} seconds until the next check.")
+            log_debug(f"Waiting for {sleep_duration} seconds until the next check.")
             await asyncio.sleep(max(sleep_duration, self.interval_seconds))
 
     def _cleanup_processed_events(self, current_time: datetime):
@@ -125,23 +125,23 @@ class EconomicEventNotifier:
         if expired_events:
             for event_id in expired_events:
                 del self.processed_events[event_id]
-            log_debug(f"[EconomicEventNotifier] Expired events removed: {expired_events}")
+            log_debug(f"Expired events removed: {expired_events}")
 
     async def _load_events(self) -> List[Dict]:
         """
         Loads economic events from the JSON file.
         """
-        log_debug(f"[EconomicEventNotifier] JSON file path for events: {self.json_file_path}")
+        log_debug(f"JSON file path for events: {self.json_file_path}")
 
         lock_file_path = os.path.join(self.sandbox_dir, 'lock.sem')
         self._wait_until_lock_file_removed(lock_file_path)
 
         if not os.path.exists(self.json_file_path):
-            log_error(f"[EconomicEventNotifier] The JSON file for economic events does not exist: {self.json_file_path}")
+            log_error(f"The JSON file for economic events does not exist: {self.json_file_path}")
             return []
 
         if os.path.getsize(self.json_file_path) == 0:
-            log_error("[EconomicEventNotifier] The JSON file for economic events is empty.")
+            log_error("The JSON file for economic events is empty.")
             return []
 
         try:
@@ -150,13 +150,13 @@ class EconomicEventNotifier:
                 events = json.load(file)
                 for event in events:
                     event['event_time'] = datetime.strptime(event['event_time'], '%Y.%m.%d %H:%M') - timedelta(hours=timezone_offset)
-            log_debug(f"[EconomicEventNotifier] Events loaded successfully.")
+            log_debug(f"Events loaded successfully.")
             return events
         except json.JSONDecodeError as e:
-            log_error("[EconomicEventNotifier] Error decoding the JSON file for economic events.")
+            log_error("Error decoding the JSON file for economic events.")
             return []
         except Exception as e:
-            log_error(f"[EconomicEventNotifier] Error loading economic events: {str(e)}")
+            log_error(f"Error loading economic events: {str(e)}")
             return []
 
     def _wait_until_lock_file_removed(self, lock_file_path: str, check_interval: int = 5, timeout: int = 300):
@@ -166,14 +166,14 @@ class EconomicEventNotifier:
         start_time = time.time()
         while True:
             if not os.path.exists(lock_file_path):
-                log_debug(f"[EconomicEventNotifier] Lock file removed: {lock_file_path}")
+                log_debug(f"Lock file removed: {lock_file_path}")
                 break
 
             if time.time() - start_time > timeout:
-                log_warning(f"[EconomicEventNotifier] Timeout reached. The lock file {lock_file_path} still exists.")
+                log_warning(f"Timeout reached. The lock file {lock_file_path} still exists.")
                 break
 
-            log_debug(f"[EconomicEventNotifier] Lock file still present: {lock_file_path}. Waiting for {check_interval} seconds.")
+            log_debug(f"Lock file still present: {lock_file_path}. Waiting for {check_interval} seconds.")
             time.sleep(check_interval)
 
     async def _handle_event(self, event: Dict):
@@ -184,12 +184,12 @@ class EconomicEventNotifier:
         event_name = event.get('event_name')
         event_time = event.get('event_time')
 
-        log_info(f"[EconomicEventNotifier] Handling event: {event_name} (ID: {event_id}) at {event_time}.")
+        log_info(f"Handling event: {event_name} (ID: {event_id}) at {event_time}.")
 
         seconds_until_event = (event_time - datetime.now()).total_seconds()
 
         self.processed_events[event_id] = event_time
-        log_debug(f"[EconomicEventNotifier] Event {event_id} marked as processed.")
+        log_debug(f"Event {event_id} marked as processed.")
 
         # Notify registered callbacks
         await self._notify_callbacks(event)
@@ -200,7 +200,7 @@ class EconomicEventNotifier:
         """
         tasks = [callback(notification) for callback in self._on_economic_event_callbacks]
         await asyncio.gather(*tasks, return_exceptions=True)
-        log_debug(f"[EconomicEventNotifier] Callbacks notified for event: {notification.get('event').get('event_id')}")
+        log_debug(f"Callbacks notified for event: {notification.get('event').get('event_id')}")
 
     def get_symbol_countries_of_interest(self, symbol):
         try:
