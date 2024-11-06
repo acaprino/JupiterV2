@@ -506,7 +506,7 @@ class Adrastea(TradingStrategy):
     @exception_handler
     async def on_deal_closed(self, position: Position):
         async with self.execution_lock:
-            log_info(f"Deal chiuso: {position}")
+            log_info(f"Deal closed: {position}")
 
             # Skip opening deals
             if position.profit == 0:
@@ -519,7 +519,7 @@ class Adrastea(TradingStrategy):
             # Determine emoji based on profit
             emoji = "🤑" if position.profit > 0 else "😔"
 
-            # Formatta i dettagli del trade per la notifica
+            # Format the trade details for notification
             trade_details = (
                 f"<b>Position ID:</b> {position.ticket}\n"
                 f"<b>Timestamp:</b> {position.time.strftime('%d/%m/%Y %H:%M:%S')}\n"
@@ -532,7 +532,7 @@ class Adrastea(TradingStrategy):
                 f"<b>Swap:</b> {position.swap}"
             )
 
-            # Invia notifica tramite Telegram
+            # Send notification via Telegram
             self.send_message_with_details(f"{emoji} <b>Deal closed</b>\n\n{trade_details}")
 
     @exception_handler
