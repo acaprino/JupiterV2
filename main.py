@@ -52,8 +52,8 @@ async def main(config_file: str):
     await strategy.bootstrap()
     await market_state_notifier.start()
     await candle_provider.start()
-    #await economic_event_notifier.start()
-    #await closed_deals_notifier.start()
+    await economic_event_notifier.start()
+    await closed_deals_notifier.start()
 
     try:
         # Keep the program running
