@@ -15,11 +15,11 @@ from utils.logger import log_init, log_info
 
 from utils.async_executor import executor
 
-async def main(config_file_param: str):
+async def main(config_file: str):
     """
     Funzione principale che avvia il bot di trading asincrono.
     """
-    config = ConfigReader(config_file_param)
+    config = ConfigReader(config_file)
 
     # Configura il logging
     warnings.filterwarnings('ignore', category=FutureWarning)

@@ -1,6 +1,7 @@
 import math
 import threading
 from datetime import timedelta
+from typing import Any
 
 import MetaTrader5 as mt5
 import pandas as pd
@@ -14,7 +15,7 @@ from datao.TradeOrder import TradeOrder
 from utils.config import ConfigReader
 from utils.enums import Timeframe, FillingType, OpType
 from utils.logger import log_warning, log_error, log_info, log_debug
-from utils.utils import now_utc
+from utils.utils import now_utc, dt_to_unix
 
 
 class MT5Broker(BrokerAPI):
@@ -58,7 +59,7 @@ class MT5Broker(BrokerAPI):
 
         # Convert from broker timezone to UTC
         timezone_offset = self.get_broker_timezone_offset(symbol)
-        log_debug(f"Timezone offset for: {timezone_offset} hours")
+        log_debug(f"Timezone offset is {timezone_offset} hours")
         df['time_open'] = df['time_open'].apply(lambda x: x.replace(microsecond=0) - timedelta(hours=timezone_offset))
         df['time_close'] = df['time_close'].apply(lambda x: x.replace(microsecond=0) - timedelta(hours=timezone_offset))
 
@@ -83,7 +84,7 @@ class MT5Broker(BrokerAPI):
 
         return df
 
-    def get_broker_timezone_offset(self, symbol) -> int:
+    def get_broker_timezone_offset(self, symbol) -> Any | None:
         symbol_info = mt5.symbol_info(symbol)
         if symbol_info is None:
             log_warning(f"{symbol} not found, can not call symbol_info().")
@@ -99,7 +100,7 @@ class MT5Broker(BrokerAPI):
 
         # Get the current UTC time
         utc_datetime = now_utc()
-        utc_unix_timestamp = int(utc_datetime.timestamp())
+        utc_unix_timestamp = dt_to_unix(utc_datetime)
 
         # Calculate the difference in seconds
         time_diff_seconds = abs(broker_time - utc_unix_timestamp)
@@ -107,7 +108,7 @@ class MT5Broker(BrokerAPI):
         # Convert the difference to hours, rounding up to the nearest hour
         offset_hours = math.ceil(time_diff_seconds / 3600)
 
-        log_debug(f"Broker Unix timestamp: {broker_time}, UTC Unix timestamp: {utc_unix_timestamp}, UTC time: {utc_datetime.strftime('%d/%m/%Y %H:%M:%S')}, Offset: {offset_hours} hours")
+        log_debug(f"[get_broker_timezone_offset] Broker Unix timestamp: {broker_time}, UTC Unix timestamp: {utc_unix_timestamp}, UTC time: {utc_datetime.strftime('%d/%m/%Y %H:%M:%S')}, Offset: {offset_hours} hours")
         return offset_hours
 
     def filling_type_to_mt5(self, filling_type: FillingType):

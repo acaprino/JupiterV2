@@ -9,7 +9,9 @@ from typing import Callable, Awaitable, List, Dict
 
 from brokers.broker_interface import BrokerAPI
 from utils.async_executor import execute_broker_call
+from utils.error_handler import exception_handler
 from utils.logger import log_debug, log_info, log_warning, log_error
+from utils.utils import now_utc
 
 
 class EconomicEventNotifier:
@@ -52,6 +54,7 @@ class EconomicEventNotifier:
             self._on_economic_event_callbacks.remove(callback)
             log_debug(f"[EconomicEventNotifier] Callback annullato: {callback}")
 
+    @exception_handler
     async def _run(self):
         while self._running:
             try:
@@ -61,7 +64,7 @@ class EconomicEventNotifier:
                     await asyncio.sleep(self.interval_seconds)
                     continue
 
-                now = datetime.now().replace(microsecond=0)
+                now = now_utc()
 
                 # Calcola il momento in cui controllare gli eventi (esattamente nelle prossime 5 minuti)
                 soon = now + timedelta(minutes=5)
@@ -70,7 +73,7 @@ class EconomicEventNotifier:
                 # Pulisci gli eventi scaduti
                 self._cleanup_processed_events(now)
 
-                events = self._load_events()
+                events = await self._load_events()
                 if not events:
                     log_warning("[EconomicEventNotifier] Nessun evento caricato.")
                     await asyncio.sleep(self.interval_seconds)
@@ -84,7 +87,7 @@ class EconomicEventNotifier:
                     event for event in events
                     if event.get('country_code') in countries
                        and event.get('event_importance') == self.importance
-                       and event.get('event_time') == soon
+                       and now <= event.get('event_time') <= soon
                        and event.get('event_id') not in self.processed_events
                 ]
                 log_debug(f"[EconomicEventNotifier] Eventi filtrati: {filtered_events}")
@@ -108,7 +111,7 @@ class EconomicEventNotifier:
                 del self.processed_events[event_id]
             log_debug(f"[EconomicEventNotifier] Eventi scaduti rimossi: {expired_events}")
 
-    def _load_events(self) -> List[Dict]:
+    async def _load_events(self) -> List[Dict]:
         """
         Carica gli eventi economici dal file JSON.
         """
@@ -126,11 +129,11 @@ class EconomicEventNotifier:
             return []
 
         try:
+            timezone_offset = await execute_broker_call(self.broker.get_broker_timezone_offset, self.symbol)
             with open(self.json_file_path, 'r') as file:
                 events = json.load(file)
                 for event in events:
-                    # Assicurati che 'event_time' sia un oggetto datetime
-                    event['event_time'] = datetime.strptime(event['event_time'], '%Y.%m.%d %H:%M')
+                    event['event_time'] = datetime.strptime(event['event_time'], '%Y.%m.%d %H:%M') - timedelta(hours=timezone_offset)
             log_debug(f"[EconomicEventNotifier] Eventi caricati con successo.")
             return events
         except json.JSONDecodeError as e:

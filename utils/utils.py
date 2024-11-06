@@ -1,3 +1,4 @@
+import calendar
 import math
 import time
 import numpy as np
@@ -19,12 +20,19 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def now_utc_unix() -> float:
-    return time.mktime(datetime.now(timezone.utc).timetuple())
+def dt_to_unix(dt) -> float:
+    if dt.tzinfo is None:
+        # Datetime naive: interpretato come UTC
+        return calendar.timegm(dt.timetuple())
+    else:
+        # Datetime aware: converti a UTC e ottieni il timestamp
+        dt_utc = dt.astimezone(timezone.utc)
+        return int(dt_utc.timestamp())
 
 
 def unix_to_datetime(unix_timestamp):
     datetime.fromtimestamp(unix_timestamp, tz=timezone.utc).replace(tzinfo=None)
+
 
 def get_recent_past_multiple_of_timeframe(timeframe):
     timeframe_seconds = timeframe.to_seconds()

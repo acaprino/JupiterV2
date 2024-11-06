@@ -498,6 +498,13 @@ class Adrastea(TradingStrategy):
     async def on_market_status_change(self, is_open: bool, closing_time: float, opening_time: float):
         async with self.execution_lock:
             log_info(f"Stato del mercato cambiato: aperto={is_open}, chiusura={closing_time}, apertura={opening_time}")
+            symbol = self.config.get_symbol()
+            if is_open:
+                log_info(f"Market for {log_info} has opened.")
+                self.send_message_with_details(f"🔔 Market for {log_info} has just <b>opened</b>. Resuming trading activities.")
+            else:
+                log_info(f"Market for {log_info} has closed.")
+                self.send_message_with_details(f"🔔 Market for {symbol} has just <b>closed</b>. Pausing trading activities.")
 
     @exception_handler
     async def on_deal_closed(self, deal_info: dict):
