@@ -79,7 +79,7 @@ class ClosedDealsNotifier:
 
             except Exception as e:
                 log_error(f"Error in ClosedDealsNotifier loop: {str(e)}")
-                await asyncio.sleep(5)  # Prevenire un loop stretto in caso di errori persistenti
+                await asyncio.sleep(5)  # Prevent a tight loop in case of persistent errors
 
     async def stop(self):
         if self._running:

@@ -12,7 +12,7 @@ from providers.market_state_notifier import MarketStateNotifier
 from strategies.adrastea import Adrastea
 from brokers.mt5_broker import MT5Broker
 from utils.config import ConfigReader
-from utils.logger import log_init, log_info
+from utils.logger import log_init, log_info, log_error
 
 from utils.async_executor import executor
 from utils.mongo_db import MongoDB
@@ -23,7 +23,11 @@ async def main(config_file: str):
     Main function that starts the asynchronous trading bot.
     """
     config = ConfigReader(config_file)
-    mongoDB = MongoDB(config_file)
+    mongo_db = MongoDB(config.get_mongo_host(), config.get_mongo_port())
+
+    if not mongo_db.test_connection():
+        log_error("MongoDB connection failed. Exiting...")
+        return
 
     # Configure logging
     warnings.filterwarnings('ignore', category=FutureWarning)

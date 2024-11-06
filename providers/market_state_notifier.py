@@ -1,5 +1,3 @@
-# providers/market_state_notifier.py
-
 import asyncio
 import time
 from typing import Callable, Awaitable, List, Optional, Tuple
@@ -7,7 +5,7 @@ from typing import Callable, Awaitable, List, Optional, Tuple
 from brokers.broker_interface import BrokerAPI
 from utils.async_executor import execute_broker_call
 from utils.error_handler import exception_handler
-from utils.logger import log_info
+from utils.logger import log_info, log_error
 
 
 class MarketStateNotifier:
@@ -97,20 +95,20 @@ class MarketStateNotifier:
     async def _run(self):
         while self._running:
             try:
-                # Recupera lo stato attuale del mercato
+                # Retrieve the current market status
                 market_is_open = await execute_broker_call(self.broker.get_market_status, self.symbol)
 
                 if not self._initialized:
-                    # Aggiorna lo stato iniziale e invoca le callback
+                    # Update the initial state and invoke callbacks
                     await self._update_market_state(market_is_open, initializing=True)
                     self._initialized = True
                 else:
                     if market_is_open != self._market_open:
-                        # Aggiorna lo stato e invoca le callback in caso di cambiamento
+                        # Update the state and invoke callbacks if there is a change
                         await self._update_market_state(market_is_open, initializing=False)
 
-                # Attendi prima del prossimo controllo
-                await asyncio.sleep(5)  # Controlla lo stato del mercato ogni 5 secondi
+                # Wait before the next check
+                await asyncio.sleep(5)  # Check the market status every 5 seconds
             except Exception as e:
-                logging.error(f"Error in MarketStateNotifier._run: {e}", exc_info=True)
-                await asyncio.sleep(5)  # Prevenire un loop stretto in caso di errori persistenti
+                log_error(f"Error in MarketStateNotifier._run: {e}", exc_info=True)
+                await asyncio.sleep(5)  # Prevent a tight loop in case of persistent errors
