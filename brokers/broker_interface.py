@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
+from typing import Optional, List
 
 from pandas import Series
 
 from datao import SymbolInfo, TradeOrder, SymbolPrice
+from datao.Position import Position
 from datao.RequestResult import RequestResult
 
 
@@ -50,4 +52,12 @@ class BrokerAPI(ABC):
 
     @abstractmethod
     def get_account_leverage(self) -> float:
+        pass
+
+    @abstractmethod
+    def get_open_positions(self, symbol: str, magic_number: Optional[int] = None) -> List[Position]:
+        pass
+
+    @abstractmethod
+    def close_position(self, position: Position, comment: Optional[str] = None, magic_number: Optional[int] = None) -> RequestResult:
         pass

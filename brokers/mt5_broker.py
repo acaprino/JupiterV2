@@ -1,13 +1,14 @@
 import math
 import threading
-from datetime import timedelta
-from typing import Any
+from datetime import timedelta, datetime, timezone
+from typing import Any, Optional, List
 
 import MetaTrader5 as mt5
 import pandas as pd
 from pandas import Series
 
 from brokers.broker_interface import BrokerAPI
+from datao import Position
 from datao.RequestResult import RequestResult
 from datao.SymbolInfo import SymbolInfo
 from datao.SymbolPrice import SymbolPrice
@@ -108,7 +109,8 @@ class MT5Broker(BrokerAPI):
         # Convert the difference to hours, rounding up to the nearest hour
         offset_hours = math.ceil(time_diff_seconds / 3600)
 
-        log_debug(f"[get_broker_timezone_offset] Broker Unix timestamp: {broker_time}, UTC Unix timestamp: {utc_unix_timestamp}, UTC time: {utc_datetime.strftime('%d/%m/%Y %H:%M:%S')}, Offset: {offset_hours} hours")
+        log_debug(
+            f"[get_broker_timezone_offset] Broker Unix timestamp: {broker_time}, UTC Unix timestamp: {utc_unix_timestamp}, UTC time: {utc_datetime.strftime('%d/%m/%Y %H:%M:%S')}, Offset: {offset_hours} hours")
         return offset_hours
 
     def filling_type_to_mt5(self, filling_type: FillingType):
@@ -265,3 +267,83 @@ class MT5Broker(BrokerAPI):
 
         log_info(f"Account leverage: {account_info.leverage}")
         return account_info.leverage
+
+    def map_trade_position(self, symbol, trade_pos: mt5.TradePosition) -> Position:
+        """
+        Mappa un oggetto TradePosition di MetaTrader5 a un'istanza della dataclass Position.
+        """
+        # Conversione dei timestamp in oggetti datetime con precisione ai millisecondi
+
+        timezone_offset = self.get_broker_timezone_offset(symbol)
+        log_debug(f"Timezone offset is {timezone_offset} hours")
+
+        time_open = datetime.fromtimestamp(trade_pos.time, tz=timezone.utc).replace(microsecond=(trade_pos.time_msc % 1000) * 1000) - timedelta(hours=timezone_offset)
+        time_update = datetime.fromtimestamp(trade_pos.time_update, tz=timezone.utc).replace(microsecond=(trade_pos.time_update_msc % 1000) * 1000) - timedelta(hours=timezone_offset)
+
+        return Position(
+            ticket=trade_pos.ticket,
+            time=time_open,
+            time_msc=trade_pos.time_msc,
+            time_update=time_update,
+            time_update_msc=trade_pos.time_update_msc,
+            type=trade_pos.type,
+            magic=trade_pos.magic,
+            identifier=trade_pos.identifier,
+            reason=trade_pos.reason,
+            volume=trade_pos.volume,
+            price_open=trade_pos.price_open,
+            sl=trade_pos.sl,
+            tp=trade_pos.tp,
+            price_current=trade_pos.price_current,
+            swap=trade_pos.swap,
+            profit=trade_pos.profit,
+            symbol=trade_pos.symbol,
+            comment=trade_pos.comment,
+            external_id=trade_pos.external_id,
+        )
+
+    def get_open_positions(self, symbol: str, magic_number: Optional[int] = None) -> List[Position]:
+        """
+           Ottiene le posizioni aperte per un dato simbolo, eventualmente filtrate per magic_number.
+
+           :param symbol: Simbolo del trading (es. 'EURUSD')
+           :param magic_number: Magic number per filtrare le posizioni (opzionale)
+           :return: Lista di istanze della dataclass Position
+           """
+        open_positions = mt5.positions_get(symbol=symbol)
+
+        if open_positions is None:
+            return []
+
+        # Filtra per magic_number se specificato
+        if magic_number is not None:
+            open_positions = [pos for pos in open_positions if pos.magic == magic_number]
+
+        # Mappa gli oggetti TradePosition a istanze della dataclass Position
+        mapped_positions = [self.map_trade_position(symbol, pos) for pos in open_positions]
+
+        return mapped_positions
+
+    def close_position(self, position: Position, comment: Optional[str] = None, magic_number: Optional[int] = None) -> RequestResult:
+        filling_mode = self.find_filling_mode(position.symbol)
+
+        close_request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": position.symbol,
+            "volume": position.volume,
+            "type": mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY,
+            "position": position.ticket,
+            "magic": magic_number,
+            "comment": comment,
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": filling_mode.value,
+        }
+
+        result = mt5.order_send(close_request)
+        req_result = RequestResult(close_request, result)
+        if req_result.success:
+            log_info(f"Position {position.ticket} successfully closed.")
+        else:
+            log_error(f"Error closing position {position.ticket}, error code = {result.retcode}, message = {result.comment}")
+
+        return req_result

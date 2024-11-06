@@ -54,6 +54,15 @@ class EconomicEventNotifier:
             self._on_economic_event_callbacks.remove(callback)
             log_debug(f"[EconomicEventNotifier] Callback annullato: {callback}")
 
+    def get_next_run_time(self, now: datetime) -> datetime:
+        interval_minutes = self.interval_seconds / 60
+        discard = timedelta(
+            minutes=now.minute % interval_minutes,
+            seconds=now.second,
+            microseconds=now.microsecond
+        )
+        return now + timedelta(minutes=interval_minutes) - discard
+
     @exception_handler
     async def _run(self):
         while self._running:
@@ -66,9 +75,9 @@ class EconomicEventNotifier:
 
                 now = now_utc()
 
-                # Calcola il momento in cui controllare gli eventi (esattamente nelle prossime 5 minuti)
-                soon = now + timedelta(minutes=5)
-                log_debug(f"[EconomicEventNotifier] Filtraggio degli eventi per le ore {soon}.")
+                # Calcola il prossimo multiplo di 5 minuti
+                next_run = self.get_next_run_time(now)
+                log_debug(f"[EconomicEventNotifier] Filtraggio degli eventi tra {now} e {next_run}.")
 
                 # Pulisci gli eventi scaduti
                 self._cleanup_processed_events(now)
@@ -76,7 +85,9 @@ class EconomicEventNotifier:
                 events = await self._load_events()
                 if not events:
                     log_warning("[EconomicEventNotifier] Nessun evento caricato.")
-                    await asyncio.sleep(self.interval_seconds)
+                    # Calcola il tempo fino al prossimo multiplo di 5 minuti
+                    sleep_duration = (next_run - now).total_seconds()
+                    await asyncio.sleep(max(sleep_duration, self.interval_seconds))
                     continue
 
                 countries = self.get_symbol_countries_of_interest(self.symbol)
@@ -87,7 +98,7 @@ class EconomicEventNotifier:
                     event for event in events
                     if event.get('country_code') in countries
                        and event.get('event_importance') == self.importance
-                       and now <= event.get('event_time') <= soon
+                       and now <= event.get('event_time') <= next_run
                        and event.get('event_id') not in self.processed_events
                 ]
                 log_debug(f"[EconomicEventNotifier] Eventi filtrati: {filtered_events}")
@@ -101,7 +112,12 @@ class EconomicEventNotifier:
             except Exception as e:
                 log_error(f"[EconomicEventNotifier] Errore durante il monitoraggio degli eventi: {str(e)}")
 
-            await asyncio.sleep(self.interval_seconds)
+            # Calcola il tempo fino al prossimo multiplo di 5 minuti
+            now = now_utc()
+            next_run = self.get_next_run_time(now)
+            sleep_duration = (next_run - now).total_seconds()
+            log_debug(f"[EconomicEventNotifier] Attesa di {sleep_duration} secondi fino al prossimo controllo.")
+            await asyncio.sleep(max(sleep_duration, self.interval_seconds))
 
     def _cleanup_processed_events(self, current_time: datetime):
         expired_events = {event_id: event_time for event_id, event_time in self.processed_events.items()
@@ -171,7 +187,6 @@ class EconomicEventNotifier:
         log_info(f"[EconomicEventNotifier] Gestione dell'evento: {event_name} (ID: {event_id}) alle {event_time}.")
 
         seconds_until_event = (event_time - datetime.now()).total_seconds()
-        minutes_until_event = int(seconds_until_event // 60)
 
         self.processed_events[event_id] = event_time
         log_debug(f"[EconomicEventNotifier] Evento {event_id} marcato come processato.")

@@ -1,6 +1,7 @@
 # strategies/my_strategy.py
 
 import math
+from typing import List
 
 import numpy as np
 import pandas as pd
@@ -9,6 +10,8 @@ from pandas import Series
 from csv_loggers.candles_logger import CandlesLogger
 from csv_loggers.strategy_events_logger import StrategyEventsLogger
 from datao import TradeOrder
+from datao.Position import Position
+from datao.RequestResult import RequestResult
 from datao.SymbolInfo import SymbolInfo
 from providers.candle_provider import CandleProvider
 from providers.market_state_notifier import MarketStateNotifier
@@ -515,6 +518,38 @@ class Adrastea(TradingStrategy):
     async def on_economic_event(self, event_info: dict):
         async with self.execution_lock:
             log_info(f"Economic event occurred: {event_info}")
+
+            event_name = event_info.get('event_name', 'Unknown Event')
+            symbol, magic_number = (self.config.get_symbol(), self.config.get_bot_magic_number())
+
+            positions: List[Position] = await execute_broker_call(
+                self.broker.get_open_positions,
+                symbol=symbol, magic_number=magic_number
+            )
+
+            if not positions:
+                message = "ℹ️ No open positions found for forced closure due to the economic event."
+                log_warning(message)
+                self.send_message_with_details(message)
+            else:
+                for position in positions:
+                    # Attempt to close the position
+                    result: RequestResult = await execute_broker_call(
+                        self.broker.close_position,
+                        position=position, comment=f"'{event_name}'", magic_number=magic_number
+                    )
+                    if result and result.success:
+                        message = (
+                            f"✅ Position {position.ticket} closed successfully due to the economic event: {event_name}.\n"
+                            f"ℹ️ This action was taken to mitigate potential risks associated with the event's impact on the markets."
+                        )
+                    else:
+                        message = (
+                            f"❌ Failed to close position {position.ticket} due to the economic event: {event_name}.\n"
+                            f"⚠️ Potential risks remain as the position could not be closed."
+                        )
+                    log_info(message)
+                    self.send_message_with_details(message)
 
     async def calculate_indicators(self, rates):
         # Convert candlestick to Heikin Ashi

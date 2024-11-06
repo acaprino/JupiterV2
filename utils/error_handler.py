@@ -1,7 +1,6 @@
 # utils/error_handler.py
 
 import logging
-import asyncio
 from functools import wraps
 
 def exception_handler(coroutine_func):
