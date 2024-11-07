@@ -65,7 +65,7 @@ class ClosedPositionNotifier:
 
                 log_debug(f"Monitoring orders between {self.last_check_timestamp} and {current_time_utc}")
 
-                deals = await execute_broker_call(self.broker.get_deals, self.last_check_timestamp - timedelta(days=100), current_time_utc, self.symbol, self.magic_number)
+                deals = await execute_broker_call(self.broker.get_deals, self.last_check_timestamp, current_time_utc, self.symbol, self.magic_number)
 
                 self.last_check_timestamp = current_time_utc
 

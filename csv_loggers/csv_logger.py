@@ -45,7 +45,7 @@ class CSVLogger:
         self.logger = logging.getLogger(logger_name) if logger_name else None
         self.memory_buffer_size = memory_buffer_size
         if self.csv_file_path and self.logger:
-            handler = RotatingFileHandler(self.csv_file_path, maxBytes=max_bytes, backupCount=backup_count)
+            handler = RotatingFileHandler(self.csv_file_path, maxBytes=max_bytes, backupCount=backup_count, encoding='utf-8')
             self.logger.setLevel(logging.INFO)
             self.logger.addHandler(handler)
         self.initialized = True

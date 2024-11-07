@@ -92,3 +92,15 @@ class FillingType(Enum):
     @property
     def label(self):
         return self.value
+
+class DealType(Enum):
+    BUY = "BUY"
+    SELL = "SELL"
+    OTHER = "OTHER"
+
+class ExitReason(Enum):
+    STOP_LOSS = "Stop Loss"
+    TAKE_PROFIT = "Take Profit"
+    MANUAL = "Manual"
+    BOT = "Bot"
+    OTHER = "Other"

@@ -1,6 +1,5 @@
 import math
 import threading
-from collections import defaultdict
 from datetime import timedelta, datetime, timezone
 from typing import Any, Optional, List, Dict
 
@@ -9,15 +8,37 @@ import pandas as pd
 from pandas import Series
 
 from brokers.broker_interface import BrokerAPI
-from datao import Deal
+from datao.Deal import Deal
+from datao.Position import Position
 from datao.RequestResult import RequestResult
 from datao.SymbolInfo import SymbolInfo
 from datao.SymbolPrice import SymbolPrice
 from datao.TradeOrder import TradeOrder
 from utils.config import ConfigReader
-from utils.enums import Timeframe, FillingType, OpType
+from utils.enums import Timeframe, FillingType, OpType, DealType, ExitReason
 from utils.logger import log_warning, log_error, log_info, log_debug
 from utils.utils_functions import now_utc, dt_to_unix, unix_to_datetime
+
+DEAL_TYPE_MAPPING = {
+    0: DealType.BUY,  # DEAL_TYPE_BUY
+    1: DealType.SELL,  # DEAL_TYPE_SELL
+    # Altri tipi vengono classificati come 'OTHER'
+}
+
+# Mappatura dei reason a ExitReason
+REASON_MAPPING = {
+    4: ExitReason.STOP_LOSS,  # DEAL_REASON_SL
+    5: ExitReason.TAKE_PROFIT,  # DEAL_REASON_TP
+    0: ExitReason.MANUAL,  # DEAL_REASON_CLIENT
+    1: ExitReason.MANUAL,  # DEAL_REASON_MOBILE
+    2: ExitReason.MANUAL,  # DEAL_REASON_WEB
+    3: ExitReason.BOT,  # DEAL_REASON_EXPERT
+    6: ExitReason.MANUAL,  # DEAL_REASON_SO (Stop Out)
+    7: ExitReason.MANUAL,  # DEAL_REASON_ROLLOVER
+    8: ExitReason.MANUAL,  # DEAL_REASON_VMARGIN
+    9: ExitReason.MANUAL,  # DEAL_REASON_SPLIT
+    # Altri reason vengono classificati come 'OTHER'
+}
 
 
 class MT5Broker(BrokerAPI):
@@ -269,9 +290,9 @@ class MT5Broker(BrokerAPI):
         log_info(f"Account leverage: {account_info.leverage}")
         return account_info.leverage
 
-    def map_trade_position(self, symbol, trade_pos: mt5.TradePosition) -> Position:
+    def map_trade_position(self, symbol, trade_pos: mt5.TradePosition) -> Deal:
         """
-        Mappa un oggetto TradePosition di MetaTrader5 a un'istanza della dataclass Position.
+        Mappa un oggetto TradePosition di MetaTrader5 a un'istanza della dataclass Deal.
         """
         # Conversione dei timestamp in oggetti datetime con precisione ai millisecondi
 
@@ -281,7 +302,7 @@ class MT5Broker(BrokerAPI):
         time_open = datetime.fromtimestamp(trade_pos.time, tz=timezone.utc).replace(microsecond=(trade_pos.time_msc % 1000) * 1000) - timedelta(hours=timezone_offset)
         time_update = datetime.fromtimestamp(trade_pos.time_update, tz=timezone.utc).replace(microsecond=(trade_pos.time_update_msc % 1000) * 1000) - timedelta(hours=timezone_offset)
 
-        return Position(
+        return Deal(
             ticket=trade_pos.ticket,
             time=time_open,
             time_msc=trade_pos.time_msc,
@@ -303,7 +324,7 @@ class MT5Broker(BrokerAPI):
             external_id=trade_pos.external_id,
         )
 
-    def get_open_positions(self, symbol: str, magic_number: Optional[int] = None) -> List[Position]:
+    def get_open_positions(self, symbol: str, magic_number: Optional[int] = None) -> List[Deal]:
         """
            Ottiene le posizioni aperte per un dato simbolo, eventualmente filtrate per magic_number.
 
@@ -311,21 +332,26 @@ class MT5Broker(BrokerAPI):
            :param magic_number: Magic number per filtrare le posizioni (opzionale)
            :return: Lista di istanze della dataclass Position
            """
-        open_positions = mt5.positions_get(symbol=symbol)
+        positions = mt5.positions_get(symbol=symbol)
 
-        if open_positions is None:
+        if not positions:
             return []
 
         # Filtra per magic_number se specificato
         if magic_number is not None:
-            open_positions = [pos for pos in open_positions if pos.magic == magic_number]
+            positions = [pos for pos in positions if pos.magic == magic_number]
+
+        df = pd.DataFrame(list(positions), columns=positions[0]._asdict().keys())
+        df['time'] = pd.to_datetime(df['time'], unit='s')
+        df.drop(['time_update', 'time_msc', 'time_update_msc', 'external_id'], axis=1, inplace=True)
+        print(df)
 
         # Mappa gli oggetti TradePosition a istanze della dataclass Position
-        mapped_positions = [self.map_trade_position(symbol, pos) for pos in open_positions]
+        mapped_positions = [self.map_trade_position(symbol, pos) for pos in positions]
 
         return mapped_positions
 
-    def close_position(self, position: Position, comment: Optional[str] = None, magic_number: Optional[int] = None) -> RequestResult:
+    def close_position(self, position: Deal, comment: Optional[str] = None, magic_number: Optional[int] = None) -> RequestResult:
         filling_mode = self.find_filling_mode(position.symbol)
 
         close_request = {
@@ -358,40 +384,73 @@ class MT5Broker(BrokerAPI):
         if deals is None:
             return {}
 
-        filtered_deals = (
+        filtered_deals = list(
             deal for deal in deals
             if (magic_number is None or deal.magic == magic_number)
-            if (symbol is None or deal.symbol == symbol)
+            and (symbol is None or deal.symbol == symbol)
         )
 
-        positions: List[Position] = []
+        positions: Dict[int, Position] = {}
 
         for deal in filtered_deals:
-            position = Position(
-                ticket=deal.ticket,
-                time=unix_to_datetime(deal.time) - timedelta(hours=timezone_offset) if deal.time is not None else None,
-                time_msc=deal.time_msc,
-                time_update_msc=deal.time_update_msc,
-                type=deal.type,
-                magic=deal.magic,
-                identifier=deal.identifier,
-                reason=deal.reason,
-                volume=deal.volume,
-                price_open=deal.price_open,
-                sl=deal.sl,
-                tp=deal.tp,
-                price_current=deal.price_current,
-                swap=deal.swap,
-                profit=deal.profit,
-                symbol=deal.symbol,
-                comment=deal.comment,
-                external_id=deal.external_id,
-                position_id=deal.position_id
-            )
-            positions.append(position)
+            try:
+                # Assumiamo che i deals passati siano già filtrati (es. position_id != 0)
 
-        deals_by_position = defaultdict(list)
-        for deal in filtered_deals:
-            deals_by_position[deal.position_id].append(deal)
+                # Classifica il singolo deal
+                deal_type_enum, exit_reason_enum = self.classify_deal(deal)
 
-        return deals_by_position
+                # Creare l'oggetto Deal
+                deal_obj = Deal(
+                    ticket=deal.ticket,
+                    order=deal.order,
+                    time=unix_to_datetime(deal.time) - timedelta(hours=timezone_offset) if deal.time is not None else None,
+                    time_msc=deal.time_msc,
+                    type=deal.type,
+                    entry=deal.entry,
+                    magic=deal.magic,
+                    position_id=deal.position_id,
+                    reason=deal.reason,
+                    volume=deal.volume,
+                    price=deal.price,
+                    commission=deal.commission,
+                    swap=deal.swap,
+                    profit=deal.profit,
+                    fee=deal.fee,
+                    symbol=deal.symbol,
+                    comment=deal.comment,
+                    external_id=deal.external_id,
+                    deal_type=deal_type_enum,
+                    exit_reason=exit_reason_enum
+                )
+
+                # Aggiungere il deal alla posizione corrispondente
+                if deal.position_id not in positions:
+                    positions[deal.position_id] = Position(position_id=deal.position_id, symbol=deal.symbol)
+
+                positions[deal.position_id].deals.append(deal_obj)
+            except Exception as e:
+                log_error(f"Errore nel processare il deal ticket {deal.ticket}: {e}")
+            continue
+
+        return positions
+
+    def classify_deal(self, deal) -> (DealType, Optional[ExitReason]):
+        """
+        Classifica un singolo deal in DealType e ExitReason.
+
+        Args:
+            deal: Oggetto deal recuperato da mt5.history_deals_get().
+
+        Returns:
+            Una tupla contenente il DealType e, se il deal è un'uscita, l'ExitReason.
+        """
+        # Determinare il DealType basato su 'type'
+        deal_type_enum = DEAL_TYPE_MAPPING.get(deal.type, DealType.OTHER)
+
+        # Determinare l'ExitReason se il deal è un'uscita
+        exit_reason_enum = None
+        if deal_type_enum in [DealType.SELL, DealType.BUY]:
+            # Se il DealType è SELL o BUY, potrebbe essere un'uscita
+            exit_reason_enum = REASON_MAPPING.get(deal.reason, ExitReason.OTHER)
+
+        return deal_type_enum, exit_reason_enum

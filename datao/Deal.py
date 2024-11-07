@@ -1,26 +1,29 @@
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Optional
+
+from utils.enums import DealType, ExitReason
 
 
 @dataclass
 class Deal:
     ticket: int
-    time: datetime  # Opening time as a datetime object
-    time_msc: int  # Milliseconds of the opening time
-    time_update: datetime  # Last update time as a datetime object
-    time_update_msc: int  # Milliseconds of the last update
+    order: int
+    time: datetime
+    time_msc: int
     type: int
+    entry: int
     magic: int
-    identifier: int
+    position_id: int
     reason: int
     volume: float
-    price_open: float
-    sl: float
-    tp: float
-    price_current: float
+    price: float
+    commission: float
     swap: float
     profit: float
+    fee: float
     symbol: str
     comment: str
     external_id: str
-    position_id: int
+    deal_type: DealType = DealType.OTHER
+    exit_reason: Optional[ExitReason] = None  # Solo per uscite

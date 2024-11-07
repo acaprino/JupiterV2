@@ -3,8 +3,11 @@ import argparse
 import asyncio
 import sys
 import warnings
+from datetime import timedelta
+from typing import List
 
 from brokers.broker_interface import BrokerAPI
+from datao import Deal
 from providers.candle_provider import CandleProvider
 from providers.closed_positions_notifier import ClosedPositionNotifier
 from providers.economic_event_notifier import EconomicEventNotifier
@@ -14,8 +17,9 @@ from brokers.mt5_broker import MT5Broker
 from utils.config import ConfigReader
 from utils.logger import log_init, log_info, log_error
 
-from utils.async_executor import executor
+from utils.async_executor import executor, execute_broker_call
 from utils.mongo_db import MongoDB
+from utils.utils_functions import now_utc
 
 
 async def main(config_file: str):
@@ -54,6 +58,9 @@ async def main(config_file: str):
     market_state_notifier.register_on_market_status_change(strategy.on_market_status_change)
     economic_event_notifier.register_on_economic_event(strategy.on_economic_event)
     closed_deals_notifier.register_on_deal_status_notifier(strategy.on_deal_closed)
+
+    current_time_utc = now_utc()
+    deals = await execute_broker_call(broker.get_deals, current_time_utc - timedelta(days=100), current_time_utc, config.get_symbol(), None)
 
     # Execute the strategy bootstrap method
     await strategy.bootstrap()
