@@ -64,5 +64,5 @@ class BrokerAPI(ABC):
         pass
 
     @abstractmethod
-    def get_deals(self, from_tms: datetime, to_tms: datetime, symbol: Optional[str] = None, magic_number: Optional[int] = None) -> Dict[int, List[Deal]]:
+    def get_positions(self, from_tms: datetime, to_tms: datetime, symbol: Optional[str] = None, magic_number: Optional[int] = None) -> Dict[int, List[Deal]]:
         pass

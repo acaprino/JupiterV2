@@ -98,7 +98,7 @@ class DealType(Enum):
     SELL = "SELL"
     OTHER = "OTHER"
 
-class ExitReason(Enum):
+class OrderSource(Enum):
     STOP_LOSS = "Stop Loss"
     TAKE_PROFIT = "Take Profit"
     MANUAL = "Manual"
