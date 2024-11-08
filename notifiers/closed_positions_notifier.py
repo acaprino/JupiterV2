@@ -21,7 +21,7 @@ class ClosedPositionNotifier:
         self.magic_number = magic_number
         self.execution_lock = execution_lock
 
-        self.interval_seconds = 60
+        self.interval_seconds = 60 * 5
         self.last_check_timestamp = None
         self._running = False
         self._task = None
@@ -37,7 +37,7 @@ class ClosedPositionNotifier:
             timezone_offset = await execute_broker_call(self.broker.get_broker_timezone_offset, self.symbol)
             self.last_check_timestamp = now_utc() - timedelta(hours=timezone_offset)
 
-            log_info("ClosedPositionNotifier started for symbol:", self.symbol)
+            log_info(f"ClosedPositionNotifier started for symbol: {self.symbol}")
 
     def register_on_deal_status_notifier(self, callback: Callable[[Deal], Awaitable[None]]):
         """Registers a callback to be called when a closed position is detected."""
