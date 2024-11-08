@@ -89,19 +89,18 @@ class FillingType(Enum):
     IOC = "Immediate-Or-Cancel (IOC)"
     RETURN = "Return (RETURN)"
 
-    @property
-    def label(self):
-        return self.value
 
 class DealType(Enum):
     BUY = "BUY"
     SELL = "SELL"
     OTHER = "OTHER"
 
+
 class PositionType(Enum):
     LONG = "LONG"
     SHORT = "SHORT"
     OTHER = "OTHER"
+
 
 class OrderSource(Enum):
     STOP_LOSS = "Stop Loss"

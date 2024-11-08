@@ -29,11 +29,15 @@ class BrokerAPI(ABC):
         pass
 
     @abstractmethod
-    def get_market_status(self, symbol: str) -> bool:
+    def us(self, symbol: str) -> bool:
         pass
 
     @abstractmethod
     def get_market_info(self, symbol: str) -> SymbolInfo:
+        pass
+
+    @abstractmethod
+    def is_market_open(self, symbol: str) -> bool:
         pass
 
     @abstractmethod

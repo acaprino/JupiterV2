@@ -1,3 +1,5 @@
+import re
+
 from csv_loggers.csv_logger import CSVLogger
 from utils.utils_functions import now_utc
 
@@ -13,11 +15,11 @@ class StrategyEventsLogger(CSVLogger):
 
     def add_event(self, time_open, time_close, close_price, state_pre, state_cur, message, supert_fast_prev, supert_slow_prev, supert_fast_cur, supert_slow_cur, stoch_k_cur, stoch_d_cur):
         event = {
-            'Candle_time_open': time_open,
-            'Candle_time_close': time_close,
+            'Candle open time': time_open,
+            'Candle close time': time_close,
             'Timestamp': now_utc().strftime("%d/%m/%Y %H:%M:%S"),
-            'Event': message,
-            'Close price:': close_price,
+            'Event': self.clean_text(message),
+            'HA Close': close_price,
             'State prev.': state_pre,
             'State cur.': state_cur,
             'Supertrend Fast prev.': supert_fast_prev,
@@ -28,3 +30,20 @@ class StrategyEventsLogger(CSVLogger):
             'Stochastic D cur.': stoch_d_cur
         }
         self.record(event)
+
+    def clean_text(self, text: str) -> str:
+        """
+        Removes emojis and trims whitespace from the beginning and end of the given string.
+
+        Parameters:
+        - text (str): The input string potentially containing emojis and extra whitespace.
+
+        Returns:
+        - str: The cleaned string with emojis and surrounding whitespace removed.
+        """
+        emoji_pattern = re.compile(
+            r'[\U00010000-\U0010FFFF]',  # Match emojis in the supplementary planes
+            flags=re.UNICODE
+        )
+        # Remove emojis and strip whitespace
+        return emoji_pattern.sub(r'', text).strip()

@@ -1,11 +1,10 @@
 import math
 import threading
-from datetime import timedelta, datetime, timezone
-from typing import Any, Optional, List, Dict, Union, Tuple
+from datetime import timedelta
+from typing import Any, Optional, Dict, Tuple
 
 import MetaTrader5 as mt5
 import pandas as pd
-from pandas import Series
 
 from brokers.broker_interface import BrokerAPI
 from datao.Deal import Deal
@@ -27,16 +26,15 @@ from utils.utils_functions import now_utc, dt_to_unix, unix_to_datetime
 DEAL_TYPE_MAPPING = {
     0: DealType.BUY,  # DEAL_TYPE_BUY
     1: DealType.SELL,  # DEAL_TYPE_SELL
-    # Altri tipi vengono classificati come 'OTHER'
+    # Other types are classified as 'OTHER'
 }
 
 POSITION_TYPE_MAPPING = {
     0: PositionType.LONG,  # DEAL_TYPE_BUY
     1: PositionType.SHORT,  # DEAL_TYPE_SELL
-    # Altri tipi vengono classificati come 'OTHER'
+    # Other types are classified as 'OTHER'
 }
 
-# Mappatura dei reason a OrderSource
 REASON_MAPPING = {
     4: OrderSource.STOP_LOSS,  # DEAL_REASON_SL
     5: OrderSource.TAKE_PROFIT,  # DEAL_REASON_TP
@@ -48,7 +46,7 @@ REASON_MAPPING = {
     7: OrderSource.MANUAL,  # DEAL_REASON_ROLLOVER
     8: OrderSource.MANUAL,  # DEAL_REASON_VMARGIN
     9: OrderSource.MANUAL,  # DEAL_REASON_SPLIT
-    # Altri reason vengono classificati come 'OTHER'
+    # Other reasons are classified as 'OTHER'
 }
 
 
@@ -59,93 +57,21 @@ class MT5Broker(BrokerAPI):
             log_error(f"initialization failed, error code {mt5.last_error()}")
             mt5.shutdown()
             raise Exception("Failed to initialize MT5")
-
         log_info("MT5 initialized successfully")
 
-        log_info(f"Trying to connect with account {config.get_mt5_account()} and password {config.get_mt5_password()} and server {config.get_mt5_server()}")
-        if not mt5.login(config.get_mt5_account(), password=config.get_mt5_password(), server=config.get_mt5_server()):
-            log_error(f"failed to connect at account #{config.get_mt5_account()}, error code: {mt5.last_error()}")
+        # Set up connection with MT5 account
+        account = config.get_mt5_account()
+        log_info(f"Trying to connect with account {account} and provided server credentials.")
+        if not mt5.login(account, password=config.get_mt5_password(), server=config.get_mt5_server()):
+            log_error(f"Failed to connect to account #{account}, error code: {mt5.last_error()}")
             raise Exception("Failed to initialize MT5")
-
         log_info("Login success")
         log_info(mt5.account_info())
 
         self._callbacks_lock = threading.Lock()
         self._running = True
 
-    def get_last_candles(self, symbol: str, timeframe: Timeframe, count: int = 1, position: int = 0) -> Series:
-        # Fetch one more candle than requested, to account for possibly excluding the open candle
-        rates = mt5.copy_rates_from_pos(symbol, self.timeframe_to_mt5(timeframe), position, count + 1)
-        # Convert rates to a DataFrame
-        df = pd.DataFrame(rates)
-
-        # Rename 'time' to 'time_open' and convert it to datetime
-        df['time_open'] = pd.to_datetime(df['time'], unit='s')
-        df.drop(columns=['time'], inplace=True)  # Drop the original 'time' column
-
-        # Calculate 'time_close' by adding the timeframe duration (in seconds) to 'time_open'
-        timeframe_duration = timeframe.to_seconds()
-        df['time_close'] = df['time_open'] + pd.to_timedelta(timeframe_duration, unit='s')
-
-        # Add original broker times
-        df['time_open_broker'] = df['time_open']
-        df['time_close_broker'] = df['time_close']
-
-        # Convert from broker timezone to UTC
-        timezone_offset = self.get_broker_timezone_offset(symbol)
-        log_debug(f"Timezone offset is {timezone_offset} hours")
-        df['time_open'] = df['time_open'].apply(lambda x: x.replace(microsecond=0) - timedelta(hours=timezone_offset))
-        df['time_close'] = df['time_close'].apply(lambda x: x.replace(microsecond=0) - timedelta(hours=timezone_offset))
-
-        # Move time columns ahead
-        columns_order = ['time_open',
-                         'time_close',
-                         'time_open_broker',
-                         'time_close_broker'] + [col for col in df.columns if
-                                                 col not in ['time_open', 'time_close', 'time_open_broker', 'time_close_broker']]
-        df = df[columns_order]
-
-        # If the last candle is open, exclude it from the DataFrame
-        current_time = now_utc()
-        log_debug(f"Current UTC time: {current_time.strftime('%d/%m/%Y %H:%M:%S')}")
-        if current_time < df.iloc[-1]['time_close']:
-            log_debug(f"Excluding the last open candle with close time: {df.iloc[-1]['time_close'].strftime('%d/%m/%Y %H:%M:%S')}")
-            df = df.iloc[:-1]
-
-        # Ensure the DataFrame has exactly 'rates_count' rows
-        df = df.iloc[-count:]
-        df = df.reset_index(drop=True)
-
-        return df
-
-    def get_broker_timezone_offset(self, symbol) -> Any | None:
-        symbol_info = mt5.symbol_info(symbol)
-        if symbol_info is None:
-            log_warning(f"{symbol} not found, can not call symbol_info().")
-            return None
-
-        market_closed = symbol_info.trade_mode == mt5.SYMBOL_TRADE_MODE_DISABLED
-        if market_closed:
-            log_warning(f"Market closed for {symbol}. Cannot get the broker server timezone offset.")
-            return None
-
-        # Get the current broker time
-        broker_time = symbol_info.time
-
-        # Get the current UTC time
-        utc_datetime = now_utc()
-        utc_unix_timestamp = dt_to_unix(utc_datetime)
-
-        # Calculate the difference in seconds
-        time_diff_seconds = abs(broker_time - utc_unix_timestamp)
-
-        # Convert the difference to hours, rounding up to the nearest hour
-        offset_hours = math.ceil(time_diff_seconds / 3600)
-
-        log_debug(
-            f"[get_broker_timezone_offset] Broker Unix timestamp: {broker_time}, UTC Unix timestamp: {utc_unix_timestamp}, UTC time: {utc_datetime.strftime('%d/%m/%Y %H:%M:%S')}, Offset: {offset_hours} hours")
-        return offset_hours
-
+    # Conversion Methods
     def filling_type_to_mt5(self, filling_type: FillingType):
         conversion_dict = {
             FillingType.FOK: mt5.ORDER_FILLING_FOK,
@@ -173,68 +99,117 @@ class MT5Broker(BrokerAPI):
         }
         return conversion_dict[order_type]
 
-    def close_order(self, order_id: int):
-        # Implement order closing logic
-        pass
-
-    def get_market_status(self, symbol: str) -> bool:
+    # Utility and Market Data Methods
+    def is_market_open(self, symbol: str) -> bool:
         symbol_info = mt5.symbol_info(symbol)
         if symbol_info is None:
-            log_warning(f"{symbol} not found, can not call symbol_info().")
+            log_warning(f"{symbol} not found, cannot retrieve symbol info.")
             return False
         return not symbol_info.trade_mode == mt5.SYMBOL_TRADE_MODE_DISABLED
 
-    def get_market_info(self, symbol: str) -> SymbolInfo | None:
+    def get_broker_timezone_offset(self, symbol) -> Optional[int]:
         symbol_info = mt5.symbol_info(symbol)
-
         if symbol_info is None:
-            log_error(f"{symbol} not found, it is not possible to place the order.")
+            log_warning(f"{symbol} not found, cannot retrieve symbol info.")
+            return None
+
+        if symbol_info.trade_mode == mt5.SYMBOL_TRADE_MODE_DISABLED:
+            log_warning(f"Market closed for {symbol}. Cannot get the broker server timezone offset.")
+            return None
+
+        # Get the current broker time and UTC time to calculate offset
+        broker_time = symbol_info.time
+        utc_unix_timestamp = dt_to_unix(now_utc())
+        time_diff_seconds = abs(broker_time - utc_unix_timestamp)
+        offset_hours = math.ceil(time_diff_seconds / 3600)
+
+        log_debug(f"Broker timestamp: {broker_time}, UTC timestamp: {utc_unix_timestamp}, Offset: {offset_hours} hours")
+        return offset_hours
+
+    def get_market_info(self, symbol: str) -> Optional[SymbolInfo]:
+        symbol_info = mt5.symbol_info(symbol)
+        if symbol_info is None:
+            log_error(f"{symbol} not found, cannot place order.")
             return None
 
         if not symbol_info.visible:
-            log_error(f"{symbol} it's not visible, I try to enable it.")
+            log_error(f"{symbol} is not visible. Attempting to enable.")
             if not mt5.symbol_select(symbol, True):
                 log_error("symbol_select() failed, cannot place order.")
                 return None
 
-        return SymbolInfo(symbol, symbol_info.volume_min, symbol_info.volume_max, symbol_info.point, symbol_info.trade_mode, symbol_info.trade_contract_size, symbol_info.volume_step,
-                          symbol_info.filling_mode)
+        return SymbolInfo(
+            symbol=symbol,
+            volume_min=symbol_info.volume_min,
+            volume_max=symbol_info.volume_max,
+            point=symbol_info.point,
+            trade_mode=symbol_info.trade_mode,
+            trade_contract_size=symbol_info.trade_contract_size,
+            volume_step=symbol_info.volume_step,
+            default_filling_mode=symbol_info.filling_mode
+        )
 
-    def shutdown(self):
-        mt5.shutdown()
-        log_info("MT5 shutdown successfully")
-
-    # Separated from get_symbol_info since find_filling_mode requires the market to be open.
-    def find_filling_mode(self, symbol: str) -> FillingType:
-        result = None
-
-        for i in range(2):
-            request = {
-                "action": mt5.TRADE_ACTION_DEAL,
-                "symbol": symbol,
-                "volume": self.get_market_info(symbol).volume_min,
-                "type": mt5.ORDER_TYPE_BUY,
-                "price": self.get_symbol_price(symbol).ask,
-                "type_filling": i,
-                "type_time": mt5.ORDER_TIME_GTC
-            }
-
-            result = mt5.order_check(request)
-            if result.comment == "Done":
-                return FillingType.from_mt5_value(i)
-
-        add_part_log = f" Check response details: {result.comment}" if result is not None else ""
-        raise ValueError(f"No valid filling mode found for symbol {symbol}.{add_part_log}")
-
-    def get_symbol_price(self, symbol: str) -> SymbolPrice | None:
+    def get_symbol_price(self, symbol: str) -> Optional[SymbolPrice]:
         symbol_info_tick = mt5.symbol_info_tick(symbol)
-
         if symbol_info_tick is None:
             log_error(f"{symbol} not found.")
             return None
 
         return SymbolPrice(symbol_info_tick.ask, symbol_info_tick.bid)
 
+    def get_last_candles(self, symbol: str, timeframe: Timeframe, count: int = 1, position: int = 0) -> pd.DataFrame:
+        # Fetch one more candle than requested to potentially exclude the open candle
+        rates = mt5.copy_rates_from_pos(symbol, self.timeframe_to_mt5(timeframe), position, count + 1)
+        df = pd.DataFrame(rates)
+
+        # Rename 'time' to 'time_open' and convert to datetime
+        df['time_open'] = pd.to_datetime(df['time'], unit='s')
+        df.drop(columns=['time'], inplace=True)
+
+        # Calculate 'time_close' and add original broker times
+        timeframe_duration = timeframe.to_seconds()
+        df['time_close'] = df['time_open'] + pd.to_timedelta(timeframe_duration, unit='s')
+        df['time_open_broker'] = df['time_open']
+        df['time_close_broker'] = df['time_close']
+
+        # Convert from broker timezone to UTC
+        timezone_offset = self.get_broker_timezone_offset(symbol)
+        log_debug(f"Timezone offset: {timezone_offset} hours")
+        df['time_open'] -= pd.to_timedelta(timezone_offset, unit='h')
+        df['time_close'] -= pd.to_timedelta(timezone_offset, unit='h')
+
+        # Arrange columns for clarity
+        columns_order = ['time_open', 'time_close', 'time_open_broker', 'time_close_broker']
+        df = df[columns_order + [col for col in df.columns if col not in columns_order]]
+
+        # Check and exclude the last candle if it's still open
+        current_time = now_utc()
+        log_debug(f"Current UTC time: {current_time.strftime('%d/%m/%Y %H:%M:%S')}")
+        if current_time < df.iloc[-1]['time_close']:
+            log_debug(f"Excluding last open candle with close time: {df.iloc[-1]['time_close'].strftime('%d/%m/%Y %H:%M:%S')}")
+            df = df.iloc[:-1]
+
+        # Ensure DataFrame has exactly 'count' rows
+        return df.iloc[-count:].reset_index(drop=True)
+
+    # Account Methods
+    def get_account_balance(self) -> float:
+        account_info = mt5.account_info()
+        if account_info is None:
+            raise Exception("Failed to retrieve account information")
+
+        log_info(f"Account balance: {account_info.balance}")
+        return account_info.balance
+
+    def get_account_leverage(self) -> float:
+        account_info = mt5.account_info()
+        if account_info is None:
+            raise Exception("Failed to retrieve account information")
+
+        log_info(f"Account leverage: {account_info.leverage}")
+        return account_info.leverage
+
+    # Order Placement Methods
     def place_order(self, request: TradeOrder) -> RequestResult:
         # Implement order placement logic similar to the previous _place_order_sync
         symbol_info = mt5.symbol_info(request.symbol)
@@ -244,10 +219,8 @@ class MT5Broker(BrokerAPI):
         if not symbol_info.trade_mode == mt5.SYMBOL_TRADE_MODE_FULL:
             raise Exception(f"Market is closed for symbol {request.symbol}, cannot place order.")
 
-        filling_mode = request.filling_mode
-        if not filling_mode:
-            filling_mode = self.find_filling_mode(request.symbol)
-            log_debug(f"Filling mode set to {filling_mode}")
+        filling_mode = request.filling_mode or self.find_filling_mode(request.symbol)
+        log_debug(f"Filling mode for {request.symbol}: {filling_mode}")
 
         op_type = self.order_type_to_mt5(request.order_type)
 
@@ -271,110 +244,13 @@ class MT5Broker(BrokerAPI):
         response = RequestResult(request, result)
 
         if not response.success:
-            if response.server_response_code == mt5.TRADE_RETCODE_MARKET_CLOSED:
-                raise Exception(f"Market is closed for symbol {request.symbol}, cannot place order.")
-            else:
-                error_message = f"Order send failed, retcode={response.server_response_code}, description={response.comment}"
-                log_error(error_message)
-                raise Exception(error_message)
+            log_error(f"Order failed, retcode={response.server_response_code}, description={response.comment}")
+            raise Exception(f"Order send failed with retcode {response.server_response_code}")
 
         return response
 
-    def get_working_directory(self):
-        return mt5.terminal_info().data_path + "\\MQL5\\Files"
-
-    def get_account_balance(self) -> float:
-        account_info = mt5.account_info()
-
-        if account_info is None:
-            raise Exception("Failed to retrieve account information")
-
-        log_info(f"Account balance: {account_info.balance}")
-        return account_info.balance
-
-    def get_account_leverage(self) -> float:
-        account_info = mt5.account_info()
-
-        if account_info is None:
-            raise Exception("Failed to retrieve account information")
-
-        log_info(f"Account leverage: {account_info.leverage}")
-        return account_info.leverage
-
-    def map_open_position(self, pos_obj: any, timezone_offset: int) -> Position:
-        pos_type_enum, source_enum = self.classify_position(pos_obj)
-        pos = Position(
-            position_id=pos_obj.identifier,
-            ticket=pos_obj.ticket,
-            volume=pos_obj.volume,
-            symbol=pos_obj.symbol,
-            time=unix_to_datetime(pos_obj.time) - timedelta(hours=timezone_offset) if pos_obj.time else None,
-            price_open=pos_obj.price_open,
-            price_current=pos_obj.price_current,
-            swap=pos_obj.swap,
-            profit=pos_obj.profit,
-            commission=0,
-            sl=pos_obj.sl,
-            tp=pos_obj.tp,
-            position_type=pos_type_enum,
-            order_source=source_enum,
-            comment=pos_obj.comment,
-            open=True
-        )
-
-        return pos
-
-    def map_deal(self, deal_obj: any, timezone_offset: int) -> Deal:
-        time = unix_to_datetime(deal_obj.time) - timedelta(hours=timezone_offset) if deal_obj.time else None
-        deal_type_enum, source_enum = self.classify_deal(deal_obj)
-
-        deal = Deal(
-            ticket=deal_obj.ticket,
-            order=deal_obj.order,
-            time=time,
-            magic=deal_obj.magic,
-            position_id=deal_obj.position_id,
-            volume=deal_obj.volume,
-            price=deal_obj.price,
-            price_open=0,
-            commission=deal_obj.commission,
-            swap=deal_obj.swap,
-            profit=deal_obj.profit,
-            fee=deal_obj.fee,
-            symbol=deal_obj.symbol,
-            comment=deal_obj.comment,
-            external_id=str(deal_obj.ticket),
-            deal_type=deal_type_enum,
-            order_source=source_enum
-        )
-
-        return deal
-
-    def get_open_positions(self, symbol: str) -> dict[int, Position]:
-        open_positions = mt5.positions_get(symbol=symbol)
-
-        if not open_positions:
-            return {}
-
-        timezone_offset = self.get_broker_timezone_offset(symbol)
-        mapped_positions = [self.map_open_position(pos, timezone_offset) for pos in open_positions]
-
-        oldest_dt = min(mapped_positions, key=lambda pos: pos.time)
-        now = now_utc() + timedelta(hours=timezone_offset)
-
-        deals = mt5.history_deals_get(dt_to_unix(oldest_dt.time), dt_to_unix(now), group=symbol)
-        mapped_deals = [self.map_deal(deal, timezone_offset) for deal in deals]
-
-        positions_dict: Dict[int, Position] = {pos.position_id: pos for pos in mapped_positions}
-
-        for deal in mapped_deals:
-            pos_id = deal.position_id
-            if pos_id in positions_dict:
-                positions_dict[pos_id].deals.append(deal)
-
-        return positions_dict
-
     def close_position(self, position: Position, comment: Optional[str] = None, magic_number: Optional[int] = None) -> RequestResult:
+        # Prepare request for closing the position
         filling_mode = self.find_filling_mode(position.symbol)
 
         close_request = {
@@ -398,77 +274,78 @@ class MT5Broker(BrokerAPI):
 
         return req_result
 
-    def get_historical_positions(self, from_tms: datetime, to_tms: datetime, symbol: Optional[str] = None, magic_number: Optional[int] = None) -> Dict[int, Position]:
-        from_unix = dt_to_unix(from_tms)
-        to_unix = dt_to_unix(to_tms)
-        deals = mt5.history_deals_get(from_unix, to_unix)
-        timezone_offset = self.get_broker_timezone_offset(symbol)
+    def shutdown(self):
+        mt5.shutdown()
+        log_info("MT5 shutdown successfully")
 
-        if deals is None:
-            return {}
-
-        filtered_deals = list(
-            deal for deal in deals
-            if (magic_number is None or deal.magic == magic_number)
-            and (symbol is None or deal.symbol == symbol)
+    # Position and Deal Mapping
+    def map_open_position(self, pos_obj: Any, timezone_offset: int) -> Position:
+        pos_type, source = self.classify_position(pos_obj)
+        return Position(
+            position_id=pos_obj.identifier,
+            ticket=pos_obj.ticket,
+            volume=pos_obj.volume,
+            symbol=pos_obj.symbol,
+            time=unix_to_datetime(pos_obj.time) - timedelta(hours=timezone_offset) if pos_obj.time else None,
+            price_open=pos_obj.price_open,
+            price_current=pos_obj.price_current,
+            swap=pos_obj.swap,
+            profit=pos_obj.profit,
+            sl=pos_obj.sl,
+            tp=pos_obj.tp,
+            position_type=pos_type,
+            order_source=source,
+            comment=pos_obj.comment,
+            open=True
         )
 
-        filtered_deals = sorted(filtered_deals, key=lambda x: (x.symbol, x.time))
+    def map_deal(self, deal_obj: Any, timezone_offset: int) -> Deal:
+        time = unix_to_datetime(deal_obj.time) - timedelta(hours=timezone_offset) if deal_obj.time else None
+        deal_type, source = self.classify_deal(deal_obj)
 
-        positions: Dict[int, Position] = {}
+        return Deal(
+            ticket=deal_obj.ticket,
+            order=deal_obj.order,
+            time=time,
+            magic=deal_obj.magic,
+            position_id=deal_obj.position_id,
+            volume=deal_obj.volume,
+            price=deal_obj.price,
+            commission=deal_obj.commission,
+            swap=deal_obj.swap,
+            profit=deal_obj.profit,
+            fee=deal_obj.fee,
+            symbol=deal_obj.symbol,
+            comment=deal_obj.comment,
+            external_id=str(deal_obj.ticket),
+            deal_type=deal_type,
+            order_source=source
+        )
 
-        for deal in filtered_deals:
-            try:
-                if deal.position_id not in positions:
-                    positions[deal.position_id] = Position(position_id=deal.position_id, symbol=deal.symbol, open=False)
+    def get_open_positions(self, symbol: str) -> Dict[int, Position]:
+        open_positions = mt5.positions_get(symbol=symbol)
+        if not open_positions:
+            return {}
 
-                positions[deal.position_id].deals.append(self.map_deal(deal, timezone_offset))
-            except Exception as e:
-                log_error(f"Errore nel processare il deal ticket {deal.ticket}: {e}")
-            continue
+        timezone_offset = self.get_broker_timezone_offset(symbol)
+        mapped_positions = {pos.position_id: self.map_open_position(pos, timezone_offset) for pos in open_positions}
 
-        return positions
+        oldest_time = min(mapped_positions.values(), key=lambda pos: pos.time).time
+        deals = mt5.history_deals_get(dt_to_unix(oldest_time), dt_to_unix(now_utc() + timedelta(hours=timezone_offset)), group=symbol)
+        for deal in deals:
+            deal_mapped = self.map_deal(deal, timezone_offset)
+            if deal_mapped.position_id in mapped_positions:
+                mapped_positions[deal_mapped.position_id].deals.append(deal_mapped)
 
-    def classify_position(self, pos_obj: any) -> Tuple[PositionType, Optional[OrderSource]]:
-        pos_type_enum = POSITION_TYPE_MAPPING.get(pos_obj.type, DealType.OTHER)
-        source_enum = REASON_MAPPING.get(pos_obj.reason, OrderSource.OTHER)
-        return pos_type_enum, source_enum
+        return mapped_positions
 
-    def classify_deal(self, deal_obj: any) -> Tuple[DealType, Optional[OrderSource]]:
-        deal_type_enum = DEAL_TYPE_MAPPING.get(deal_obj.type, DealType.OTHER)
-        source_enum = REASON_MAPPING.get(deal_obj.reason, OrderSource.OTHER)
-        return deal_type_enum, source_enum
+    # Classification Methods
+    def classify_position(self, pos_obj: Any) -> Tuple[PositionType, Optional[OrderSource]]:
+        pos_type = POSITION_TYPE_MAPPING.get(pos_obj.type, PositionType.OTHER)
+        source = REASON_MAPPING.get(pos_obj.reason, OrderSource.OTHER)
+        return pos_type, source
 
-    def create_positions_dict(self, deals: List[any], timezone_offset: int) -> Dict[int, Position]:
-        """
-        Crea un dizionario che mappa position_id a oggetti Position contenenti i deals storici.
-
-        Args:
-            deals: Lista di oggetti TradeDeal recuperati da mt5.history_deals_get().
-            timezone_offset: Offset del fuso orario del broker in ore.
-
-        Returns:
-            Un dizionario che mappa position_id a oggetti Position.
-        """
-        positions: Dict[int, Position] = {}
-
-        for deal_obj in deals:
-            try:
-                # Filtra i deals senza position_id (es. CREDIT, BALANCE, ecc.)
-                if deal_obj.position_id == 0:
-                    continue
-
-                # Mappa il TradeDeal a un'istanza di Deal
-                deal = self.map_deal(deal_obj, timezone_offset)
-
-                # Aggiungere il deal alla posizione corrispondente
-                if deal.position_id not in positions:
-                    positions[deal.position_id] = Position(position_id=deal.position_id, symbol=deal.symbol)
-
-                positions[deal.position_id].deals.append(deal)
-
-            except Exception as e:
-                log_error(f"Errore nel processare il deal ticket {deal_obj.ticket}: {e}")
-                continue
-
-        return positions
+    def classify_deal(self, deal_obj: Any) -> Tuple[DealType, Optional[OrderSource]]:
+        deal_type = DEAL_TYPE_MAPPING.get(deal_obj.type, DealType.OTHER)
+        source = REASON_MAPPING.get(deal_obj.reason, OrderSource.OTHER)
+        return deal_type, source

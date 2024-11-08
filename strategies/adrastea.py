@@ -83,6 +83,7 @@ class Adrastea(TradingStrategy):
 
         self.telegram.start()
         self.telegram.add_command_callback_handler(self.signal_confirmation_handler)
+        self.live_candles_logger = CandlesLogger(config.get_symbol(), config.get_timeframe(), config.get_trading_direction(), custom_name='live')
 
     @exception_handler
     async def bootstrap(self):
@@ -91,6 +92,8 @@ class Adrastea(TradingStrategy):
             timeframe = self.config.get_timeframe()
             symbol = self.config.get_symbol()
             trading_direction = self.config.get_trading_direction()
+
+            log_debug(f"Config - Symbol: {symbol}, Timeframe: {timeframe}, Direction: {trading_direction}")
 
             bootstrap_rates_count = int(500 * (1 / timeframe.to_hours()))
             tot_candles_count = self.heikin_ashi_candles_buffer + bootstrap_rates_count + self.get_minimum_frames_count()
@@ -105,27 +108,24 @@ class Adrastea(TradingStrategy):
                     tot_candles_count
                 )
 
+                log_info("Calculating indicators on historical candles.")
                 await self.calculate_indicators(candles)
 
                 first_index = self.heikin_ashi_candles_buffer + self.get_minimum_frames_count() - 1
-                last_index = tot_candles_count - 1  # Exclude last closed candle because it will be analysed in the first live loop, range is exclusive
+                last_index = tot_candles_count - 1
 
                 for i in range(first_index, last_index):
-                    log_info(f"Bootstrap frame {i + 1}")
-                    log_info(f"Candle: {describe_candle(candles.iloc[i])}")
-
-                    log_debug("Checking signals for bootstrap frame.")
+                    log_debug(f"Bootstrap frame {i + 1}, Candle data: {describe_candle(candles.iloc[i])}")
 
                     bootstrap_candles_logger.add_candle(candles.iloc[i])
-                    self.should_enter, self.prev_state, self.cur_state, self.prev_condition_candle, self.cur_condition_candle = self.check_signals(rates=candles,
-                                                                                                                                                   i=i,
-                                                                                                                                                   trading_direction=trading_direction,
-                                                                                                                                                   state=self.cur_state,
-                                                                                                                                                   cur_condition_candle=self.cur_condition_candle)
+                    self.should_enter, self.prev_state, self.cur_state, self.prev_condition_candle, self.cur_condition_candle = self.check_signals(
+                        rates=candles, i=i, trading_direction=trading_direction, state=self.cur_state,
+                        cur_condition_candle=self.cur_condition_candle
+                    )
 
-                log_debug(f"Finished bootstrap process with state={self.cur_state} and last_condition_candle={describe_candle(self.cur_condition_candle)}")
+                log_info(f"Bootstrap complete - Initial State: {self.cur_state}")
 
-                self.send_message_with_details(f"🔄 Bootstrapping Complete - <b>Bot Ready for Trading</b>")
+                self.send_message_with_details("🔄 Bootstrapping Complete - <b>Bot Ready for Trading</b>")
                 self.notify_state_change(candles, last_index)
                 self.initialized = True
             except Exception as e:
@@ -161,10 +161,18 @@ class Adrastea(TradingStrategy):
         def notify_event(event):
             log_debug(event)
             events_logger.add_event(
-                cur_candle['time_open'], cur_candle['time_close'], close,
-                self.prev_state, self.cur_state, event,
-                supert_fast_prev, supert_slow_prev, supert_fast_cur, supert_slow_cur,
-                stoch_k_cur, stoch_d_cur
+                time_open=cur_candle['time_open'],
+                time_close=cur_candle['time_close'],
+                close_price=close,
+                state_pre=self.prev_state,
+                state_cur=self.cur_state,
+                message=event,
+                supert_fast_prev=supert_fast_prev,
+                supert_slow_prev=supert_slow_prev,
+                supert_fast_cur=supert_fast_cur,
+                supert_slow_cur=supert_slow_cur,
+                stoch_k_cur=stoch_k_cur,
+                stoch_d_cur=stoch_d_cur
             )
             self.send_message_with_details(event)
 
@@ -235,10 +243,6 @@ class Adrastea(TradingStrategy):
         async with self.execution_lock:
             log_info(f"New tick for {timeframe} at {timestamp}")
 
-            timeframe = self.config.get_timeframe()
-            symbol = self.config.get_symbol()
-            trading_direction = self.config.get_trading_direction()
-
             candles_count = self.heikin_ashi_candles_buffer + self.get_minimum_frames_count()
 
             candles = await execute_broker_call(
@@ -252,41 +256,28 @@ class Adrastea(TradingStrategy):
             last_candle = candles.iloc[-1]
             log_info(f"Candle: {describe_candle(last_candle)}")
 
-            log_debug(f"Checking signals - Start: State={self.cur_state}, Number of Candles={len(candles)}, Timeframe={timeframe}, Symbol={symbol}, Trading Direction={trading_direction}")
-
             log_debug("Checking for trading signals.")
-            self.should_enter, self.prev_state, self.cur_state, self.prev_condition_candle, self.cur_condition_candle = self.check_signals(rates=candles,
-                                                                                                                                           i=len(candles) - 1,
-                                                                                                                                           trading_direction=trading_direction,
-                                                                                                                                           state=self.cur_state,
-                                                                                                                                           cur_condition_candle=self.cur_condition_candle)
-
-            log_debug(f"Checking signals - Results: should_enter={self.should_enter}, State={self.cur_state}, last_condition_candle={describe_candle(self.cur_condition_candle)}")
-
-            last_candle_time_str = f"{last_candle['time_open'].strftime('%Y-%m-%d %H:%M:%S')} - {last_candle['time_close'].strftime('%Y-%m-%d %H:%M:%S')}"
-            # self.log_candle(last_candle)
+            self.should_enter, self.prev_state, self.cur_state, self.prev_condition_candle, self.cur_condition_candle = self.check_signals(
+                rates=candles, i=len(candles) - 1, trading_direction=self.config.get_trading_direction(),
+                state=self.cur_state, cur_condition_candle=self.cur_condition_candle
+            )
 
             self.notify_state_change(candles, len(candles) - 1)
 
             if self.should_enter:
-                log_debug("Condition satisfied for placing an order. Sending entry signal notification.")
-                order_type_enter = OpType.BUY if trading_direction == TradingDirection.LONG else OpType.SELL
-                log_debug(f"Determined order type as {order_type_enter.label}.")
-                log_info(f"Condition satisfied for candle {last_candle_time_str}, entry signal sent.")
-                log_debug("Processing order placement due to trading signal.")
+                order_type_enter = OpType.BUY if self.config.get_trading_direction() == TradingDirection.LONG else OpType.SELL
+                log_info(f"Placing order of type {order_type_enter.label} due to trading signal.")
 
                 if self.check_signal_confirmation_and_place_order(self.prev_condition_candle):
                     order = await self.prepare_order_to_place(last_candle)
                     await self.place_order(order)
             else:
-                log_info(f"No condition satisfied for candle {last_candle_time_str}")
+                log_info(f"No condition satisfied for candle {describe_candle(last_candle)}")
 
             try:
-                log_debug("Adding last candle to buffers and logging.")
-                live_candles_logger = CandlesLogger(symbol, timeframe, trading_direction, custom_name='live')
-                live_candles_logger.add_candle(last_candle)
+                self.live_candles_logger.add_candle(last_candle)
             except Exception as e:
-                log_error(f"Error while generating analysis data: {e}")
+                log_error(f"Error while logging candle: {e}")
 
     @exception_handler
     async def prepare_order_to_place(self, cur_candle: Series) -> TradeOrder | None:

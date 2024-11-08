@@ -4,7 +4,10 @@ from utils.utils_functions import string_to_enum
 
 
 class ConfigReader:
-    # Class attributes
+    """
+    Singleton class to read and provide configuration data from a JSON file.
+    Converts specific string values to corresponding Enum types for ease of use.
+    """
     metatrader5_config = None
     live_config = None
     bot_config = None
@@ -13,93 +16,72 @@ class ConfigReader:
     _instance = None  # Singleton instance
 
     def __new__(cls, config_file_param: str = None):
-        # Singleton pattern to ensure only one instance is created
+        """Implements singleton pattern to ensure only one instance is created."""
         if cls._instance is None:
-            # Corrected line: Only pass `cls` to `__new__`
             cls._instance = super(ConfigReader, cls).__new__(cls)
             cls._instance._initialized = False
         return cls._instance
 
     def __init__(self, config_file_param: str = None):
-        # Prevent reinitialization
         if not self._initialized:
             self.config = None
             self._initialized = True
             if config_file_param:
                 self.load_config(config_file_param)
 
-    def load_config(self, filepath):
-        """
-        Loads the configuration from a file.
-
-        Parameters:
-        - filepath: Path to the configuration file.
-        """
-
-        # Load the configuration from the file
+    def load_config(self, filepath: str):
+        """Loads configuration from the specified JSON file."""
         with open(filepath, 'r') as file:
             self.config = json.load(file)
-        # Initialize other configurations
         self._initialize_config()
 
     def _initialize_config(self):
-        """
-        Initializes various configuration sections from the loaded JSON data.
-        Converts certain string values to their corresponding enum types.
-        """
-        # Initializes MetaTrader5 config
+        """Initializes various configuration sections and converts strings to Enums where needed."""
+        # Initialize MetaTrader5 config
         self.metatrader5_config = self.config.get("mt5", {})
 
-        # Initializes Live config
+        # Initialize Live config and convert certain fields to Enums
         live_config = self.config.get("live", {})
-        if 'timeframe' in live_config:
-            live_config['timeframe'] = string_to_enum(Timeframe, live_config['timeframe'])
-        if 'trading_direction' in live_config:
-            live_config['trading_direction'] = string_to_enum(TradingDirection, live_config['trading_direction'])
+        live_config['timeframe'] = string_to_enum(Timeframe, live_config.get('timeframe'))
+        live_config['trading_direction'] = string_to_enum(TradingDirection, live_config.get('trading_direction'))
         self.live_config = live_config
 
-        # Initializes Bot config
+        # Initialize Bot config and convert mode to Enum
         bot_config = self.config.get("bot", {})
-        if 'mode' in bot_config and bot_config['mode']:
-            bot_config['mode'] = string_to_enum(BotMode, bot_config['mode'])
+        bot_config['mode'] = string_to_enum(BotMode, bot_config.get('mode'))
         self.bot_config = bot_config
 
-        # Initializes Telegram config
+        # Initialize Telegram config and convert notification level to Enum
         telegram_config = self.config.get("telegram", {})
-        if 'notification_level' in telegram_config and telegram_config['notification_level']:
-            telegram_config['notification_level'] = string_to_enum(NotificationLevel, telegram_config['notification_level'])
+        telegram_config['notification_level'] = string_to_enum(NotificationLevel, telegram_config.get('notification_level'))
         self.telegram_config = telegram_config
 
-        # Initializes MongoDB config
-        mongo_config = self.config.get("mongo", {})
-        self.mongo_config = mongo_config
+        # Initialize MongoDB config
+        self.mongo_config = self.config.get("mongo", {})
 
-    # Getter methods
+    # Getter methods for each configuration section
 
     def get_metatrader5_config(self):
-        if self.config is None:
-            raise ValueError("Configuration not loaded. Call load_config(filepath) first.")
+        self._ensure_config_loaded()
         return self.metatrader5_config
 
     def get_config(self):
-        if self.config is None:
-            raise ValueError("Configuration not loaded. Call load_config(filepath) first.")
+        self._ensure_config_loaded()
         return self.live_config
 
     def get_bot_config(self):
-        if self.config is None:
-            raise ValueError("Configuration not loaded. Call load_config(filepath) first.")
+        self._ensure_config_loaded()
         return self.bot_config
 
     def get_telegram_config(self):
-        if self.config is None:
-            raise ValueError("Configuration not loaded. Call load_config(filepath) first.")
+        self._ensure_config_loaded()
         return self.telegram_config
 
     def get_mongo_config(self):
-        if self.config is None:
-            raise ValueError("Configuration not loaded. Call load_config(filepath) first.")
+        self._ensure_config_loaded()
         return self.mongo_config
+
+    # Specific configuration getters for each section
 
     def get_mt5_timeout(self):
         return self.get_metatrader5_config().get("timeout")
@@ -163,3 +145,8 @@ class ConfigReader:
 
     def get_mongo_db_name(self) -> str:
         return self.get_mongo_config().get("db_name")
+
+    # Private helper to ensure configuration is loaded
+    def _ensure_config_loaded(self):
+        if self.config is None:
+            raise ValueError("Configuration not loaded. Call load_config(filepath) first.")
