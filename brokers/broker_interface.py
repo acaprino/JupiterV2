@@ -25,14 +25,6 @@ class BrokerAPI(ABC):
         pass
 
     @abstractmethod
-    def close_order(self, order_id: int):
-        pass
-
-    @abstractmethod
-    def us(self, symbol: str) -> bool:
-        pass
-
-    @abstractmethod
     def get_market_info(self, symbol: str) -> SymbolInfo:
         pass
 

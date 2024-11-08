@@ -1,6 +1,6 @@
 import math
 import threading
-from datetime import timedelta
+from datetime import timedelta, datetime
 from typing import Any, Optional, Dict, Tuple
 
 import MetaTrader5 as mt5
@@ -192,6 +192,13 @@ class MT5Broker(BrokerAPI):
         # Ensure DataFrame has exactly 'count' rows
         return df.iloc[-count:].reset_index(drop=True)
 
+    def shutdown(self):
+        mt5.shutdown()
+        log_info("MT5 shutdown successfully")
+
+    def get_working_directory(self):
+        return mt5.terminal_info().data_path + "\\MQL5\\Files"
+
     # Account Methods
     def get_account_balance(self) -> float:
         account_info = mt5.account_info()
@@ -274,10 +281,6 @@ class MT5Broker(BrokerAPI):
 
         return req_result
 
-    def shutdown(self):
-        mt5.shutdown()
-        log_info("MT5 shutdown successfully")
-
     # Position and Deal Mapping
     def map_open_position(self, pos_obj: Any, timezone_offset: int) -> Position:
         pos_type, source = self.classify_position(pos_obj)
@@ -338,6 +341,37 @@ class MT5Broker(BrokerAPI):
                 mapped_positions[deal_mapped.position_id].deals.append(deal_mapped)
 
         return mapped_positions
+
+    def get_historical_positions(self, from_tms: datetime, to_tms: datetime, symbol: Optional[str] = None, magic_number: Optional[int] = None) -> Dict[int, Position]:
+        from_unix = dt_to_unix(from_tms)
+        to_unix = dt_to_unix(to_tms)
+        deals = mt5.history_deals_get(from_unix, to_unix)
+        timezone_offset = self.get_broker_timezone_offset(symbol)
+
+        if deals is None:
+            return {}
+
+        filtered_deals = list(
+            deal for deal in deals
+            if (magic_number is None or deal.magic == magic_number)
+            and (symbol is None or deal.symbol == symbol)
+        )
+
+        filtered_deals = sorted(filtered_deals, key=lambda x: (x.symbol, x.time))
+
+        positions: Dict[int, Position] = {}
+
+        for deal in filtered_deals:
+            try:
+                if deal.position_id not in positions:
+                    positions[deal.position_id] = Position(position_id=deal.position_id, symbol=deal.symbol, open=False)
+
+                positions[deal.position_id].deals.append(self.map_deal(deal, timezone_offset))
+            except Exception as e:
+                log_error(f"Error while processing deal with ticket {deal.ticket}: {e}")
+            continue
+
+        return positions
 
     # Classification Methods
     def classify_position(self, pos_obj: Any) -> Tuple[PositionType, Optional[OrderSource]]:
