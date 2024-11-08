@@ -5,7 +5,7 @@ from utils.error_handler import exception_handler
 from utils.logger import log_error
 
 # Executor for handling blocking broker calls
-executor = ThreadPoolExecutor(max_workers=5)
+executor = ThreadPoolExecutor(max_workers=1)
 
 
 @exception_handler
