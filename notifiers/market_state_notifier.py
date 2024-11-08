@@ -6,7 +6,7 @@ from typing import Callable, Awaitable, List, Optional
 from brokers.broker_interface import BrokerAPI
 from utils.async_executor import execute_broker_call
 from utils.error_handler import exception_handler
-from utils.logger import log_info, log_error
+from utils.logger import log_info, log_error, log_debug
 
 
 class MarketStateNotifier:
@@ -97,6 +97,8 @@ class MarketStateNotifier:
                 # Calculate the time until the next interval in minutes
                 now = datetime.now()
                 seconds_until_next_interval = (self.check_interval_minutes - now.minute % self.check_interval_minutes) * 60 - now.second
+
+                log_debug(f"Market is {'open' if market_is_open else 'closed'} for {self.symbol}. Next check in {seconds_until_next_interval} seconds.")
                 await asyncio.sleep(seconds_until_next_interval)
             except Exception as e:
                 log_error(f"Error in MarketStateNotifier._run: {e}")
