@@ -78,10 +78,11 @@ class Adrastea(TradingStrategy):
         self.prev_state = None
         self.cur_state = None
         self.should_enter = False
-        self.market_open = False
+        self.market_open_event = asyncio.Event()
         self.heikin_ashi_candles_buffer = int(1000 * config.get_timeframe().to_hours())
         self.telegram = TelegramBotWrapper(config.get_telegram_token())
 
+        self.market_open_event.clear()  # Start with the market as closed
         self.telegram.start()
         self.telegram.add_command_callback_handler(self.signal_confirmation_handler)
         self.live_candles_logger = CandlesLogger(config.get_symbol(), config.get_timeframe(), config.get_trading_direction(), custom_name='live')
@@ -240,8 +241,28 @@ class Adrastea(TradingStrategy):
             notify_event(
                 f"5️⃣ ✅ <b>Condition 5 matched</b>: Final signal generated for {dir_str} trade. The current candle time {cur_candle_time} is from the candle following the last condition candle: {last_condition_candle_time}")
 
+    @exception_handler
+    async def on_market_status_change(self, is_open: bool, closing_time: float, opening_time: float, initializing: bool):
+        async with self.execution_lock:
+            symbol = self.config.get_symbol()
+            self.market_open = is_open  # Aggiorna lo stato del mercato
+            if is_open:
+                log_info(f"Market for {symbol} has opened.")
+                self.market_open_event.set()  # Imposta l'evento per consentire a on_new_tick di procedere
+                if not initializing:
+                    self.send_message_with_details(f"⏰ Market for {symbol} has just <b>opened</b>. Resuming trading activities.")
+            else:
+                log_info(f"Market for {symbol} has closed.")
+                self.market_open_event.clear()  # Rimuove l'evento per bloccare on_new_tick
+                if not initializing:
+                    self.send_message_with_details(f"⏸️ Market for {symbol} has just <b>closed</b>. Pausing trading activities.")
+
+    @exception_handler
     async def on_new_tick(self, timeframe: Timeframe, timestamp: datetime):
-        await asyncio.sleep(5)  # Wait for the candles and market status to be updated
+        # Attendi fino all'apertura del mercato, bloccante fino a che market_open_event non è impostato
+        await self.market_open_event.wait()
+
+        # Sincronizza l'esecuzione per evitare conflitti
         async with self.execution_lock:
             if not self.market_open:
                 log_info("Market is closed. Skipping tick processing.")
@@ -475,18 +496,6 @@ class Adrastea(TradingStrategy):
             self.send_message_with_details(f"🚫 Signal for candle {open_dt} - {close_dt} not confirmed by {user_username}. Not placing order.")
 
         return confirmed
-
-    @exception_handler
-    async def on_market_status_change(self, is_open: bool, closing_time: float, opening_time: float, initializing: bool):
-        async with self.execution_lock:
-            symbol = self.config.get_symbol()
-            self.market_open = is_open
-            if is_open:
-                log_info(f"Market for {symbol} has opened.")
-                if not initializing: self.send_message_with_details(f"⏰ Market for {symbol} has just <b>opened</b>. Resuming trading activities.")
-            else:
-                log_info(f"Market for {symbol} has closed.")
-                if not initializing: self.send_message_with_details(f"⏸️ Market for {symbol} has just <b>closed</b>. Pausing trading activities.")
 
     @exception_handler
     async def on_deal_closed(self, position: Position):

@@ -18,6 +18,7 @@ class MarketStateNotifier:
         self.broker = broker
         self.symbol = symbol
         self.execution_lock = execution_lock
+        self.check_interval_minutes = 1
         self._market_open: Optional[bool] = None
         self._running = False
         self._task = None
@@ -80,7 +81,7 @@ class MarketStateNotifier:
 
     @exception_handler
     async def _run(self):
-        """Continuously checks the market state every multiple of 5 minutes."""
+        """Continuously checks the market state at specified interval in minutes."""
         while self._running:
             try:
                 # Call broker to check if the market is open
@@ -93,11 +94,10 @@ class MarketStateNotifier:
                 elif market_is_open != self._market_open:
                     await self._update_market_state(market_is_open, initializing=False)
 
-                # Calculate the time until the next 5-minute interval
+                # Calculate the time until the next interval in minutes
                 now = datetime.now()
-                seconds_until_next_5_min = (5 - now.minute % 5) * 60 - now.second
-                # Sleep until the next 5-minute interval plus 1 second to be sure the market state is updated
-                await asyncio.sleep(seconds_until_next_5_min + 1)
+                seconds_until_next_interval = (self.check_interval_minutes - now.minute % self.check_interval_minutes) * 60 - now.second
+                await asyncio.sleep(seconds_until_next_interval)
             except Exception as e:
                 log_error(f"Error in MarketStateNotifier._run: {e}")
                 await asyncio.sleep(5)  # Sleep before retrying after an error
