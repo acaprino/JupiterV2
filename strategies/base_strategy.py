@@ -1,48 +1,65 @@
 # strategies/base_strategy.py
 
 from abc import ABC, abstractmethod
-import asyncio
+from datetime import datetime
 from typing import Dict, Optional
 
-from datao import TradeOrder
+from datao.Position import Position
+from utils.enums import Timeframe
 
 
 class TradingStrategy(ABC):
     """
-    Classe base astratta per le strategie di trading.
+    Abstract base class for trading strategies.
     """
 
     @abstractmethod
     async def bootstrap(self):
         """
-        Metodo chiamato per inizializzare la strategia prima di processare le prime candele.
+        Method called to initialize the strategy before processing the first candles.
         """
         pass
 
     @abstractmethod
-    async def on_new_candle(self, candle: dict):
+    async def on_new_tick(self, timeframe: Timeframe, timestamp: datetime):
         """
-        Metodo chiamato quando una nuova candela è disponibile.
+        Method called when a new tick is available.
+
+        Args:
+            timeframe (Timeframe): The timeframe of the tick.
+            timestamp (datetime): The timestamp of the tick.
         """
         pass
 
     @abstractmethod
     async def on_market_status_change(self, is_open: bool, closing_time: Optional[float], opening_time: Optional[float], initializing: Optional[bool]):
         """
-        Metodo chiamato quando lo stato del mercato cambia.
+        Method called when the market status changes.
+
+        Args:
+            is_open (bool): Whether the market is open.
+            closing_time (Optional[float]): The closing time of the market.
+            opening_time (Optional[float]): The opening time of the market.
+            initializing (Optional[bool]): Whether the market is initializing.
         """
         pass
 
     @abstractmethod
-    async def on_deal_closed(self, deal_info: dict):
+    async def on_deal_closed(self, position: Position):
         """
-        Metodo chiamato quando un deal viene chiuso.
+        Method called when a deal is closed.
+
+        Args:
+            position (Position): The position that was closed.
         """
         pass
 
     @abstractmethod
     async def on_economic_event(self, event_info: dict):
         """
-        Metodo chiamato quando si verifica un evento economico.
+        Method called when an economic event occurs.
+
+        Args:
+            event_info (dict): Information about the economic event.
         """
-        pass
+        pass  # strategies/base_strategy.py

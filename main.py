@@ -3,21 +3,18 @@ import argparse
 import asyncio
 import sys
 import warnings
-from datetime import timedelta
-from typing import List
 
 from brokers.broker_interface import BrokerAPI
-from datao import Deal
-from providers.candle_provider import CandleProvider
-from providers.closed_positions_notifier import ClosedPositionNotifier
-from providers.economic_event_notifier import EconomicEventNotifier
-from providers.market_state_notifier import MarketStateNotifier
+from notifiers.closed_positions_notifier import ClosedPositionNotifier
+from notifiers.economic_event_notifier import EconomicEventNotifier
+from notifiers.market_state_notifier import MarketStateNotifier
+from notifiers.new_tick_notifier import TickNotifier
 from strategies.adrastea import Adrastea
 from brokers.mt5_broker import MT5Broker
 from utils.config import ConfigReader
 from utils.logger import log_init, log_info, log_error
 
-from utils.async_executor import executor, execute_broker_call
+from utils.async_executor import executor
 from utils.mongo_db import MongoDB
 from utils.utils_functions import now_utc
 
@@ -45,28 +42,26 @@ async def main(config_file: str):
     execution_lock = asyncio.Lock()
 
     # Initialize the MarketStateNotifier
+    tick_notifier = TickNotifier(timeframe=config.get_timeframe(), execution_lock=execution_lock)
     market_state_notifier = MarketStateNotifier(broker, config.get_symbol(), execution_lock)
-    candle_provider = CandleProvider(broker, symbol=config.get_symbol(), timeframe=config.get_timeframe(), execution_lock=execution_lock)
     economic_event_notifier = EconomicEventNotifier(broker, symbol=config.get_symbol(), execution_lock=execution_lock)
     closed_deals_notifier = ClosedPositionNotifier(broker, symbol=config.get_symbol(), magic_number=config.get_bot_magic_number(), execution_lock=execution_lock)
 
     # Instantiate the strategy
-    strategy = Adrastea(broker, config, market_state_notifier, candle_provider)
+    strategy = Adrastea(broker, config, execution_lock)
 
     # Register event handlers
-    candle_provider.register_on_new_candle(strategy.on_new_candle)
+    tick_notifier.register_on_new_tick(strategy.on_new_tick)
     market_state_notifier.register_on_market_status_change(strategy.on_market_status_change)
     economic_event_notifier.register_on_economic_event(strategy.on_economic_event)
     closed_deals_notifier.register_on_deal_status_notifier(strategy.on_deal_closed)
 
     current_time_utc = now_utc()
-    open_positions = await execute_broker_call(broker.get_open_positions, config.get_symbol())
-    positions = await execute_broker_call(broker.get_historical_positions, current_time_utc - timedelta(days=100), current_time_utc, config.get_symbol(), None)
 
     # Execute the strategy bootstrap method
     await strategy.bootstrap()
     await market_state_notifier.start()
-    await candle_provider.start()
+    await tick_notifier.start()
     await economic_event_notifier.start()
     await closed_deals_notifier.start()
 
@@ -78,8 +73,8 @@ async def main(config_file: str):
         log_info("Keyboard interruption detected. Stopping the bot...")
     finally:
         # Stop the providers and close the broker connection
-        await candle_provider.stop()
         await market_state_notifier.stop()
+        await tick_notifier.stop()
         await economic_event_notifier.stop()
         await closed_deals_notifier.stop()
         broker.shutdown()

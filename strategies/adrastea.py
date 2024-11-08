@@ -1,6 +1,7 @@
 # strategies/my_strategy.py
-
+import asyncio
 import math
+from datetime import datetime
 from typing import List, Tuple, Optional
 
 import numpy as np
@@ -9,17 +10,16 @@ from pandas import Series
 
 from csv_loggers.candles_logger import CandlesLogger
 from csv_loggers.strategy_events_logger import StrategyEventsLogger
-from datao import TradeOrder
 from datao.Deal import Deal
+from datao.Position import Position
 from datao.RequestResult import RequestResult
 from datao.SymbolInfo import SymbolInfo
-from providers.candle_provider import CandleProvider
-from providers.market_state_notifier import MarketStateNotifier
+from datao.TradeOrder import TradeOrder
 from strategies.base_strategy import TradingStrategy
 from strategies.indicators import supertrend, stochastic, average_true_range
 from utils.async_executor import execute_broker_call
 from utils.config import ConfigReader
-from utils.enums import Indicators, Timeframe, TradingDirection, OpType, NotificationLevel
+from utils.enums import Indicators, Timeframe, TradingDirection, OpType, NotificationLevel, OrderSource
 from utils.error_handler import exception_handler
 from brokers.broker_interface import BrokerAPI
 
@@ -67,12 +67,10 @@ class Adrastea(TradingStrategy):
     Implementazione concreta della strategia di trading.
     """
 
-    def __init__(self, broker: BrokerAPI, config: ConfigReader, market_state_notifier: MarketStateNotifier, candle_provider: CandleProvider):
+    def __init__(self, broker: BrokerAPI, config: ConfigReader, execution_lock: asyncio.Lock):
         self.broker = broker
         self.config = config
-        self.market_state_notifier = market_state_notifier
-        self.candle_provider = candle_provider
-        self.execution_lock = market_state_notifier.execution_lock  # Utilizza lo stesso lock per sincronizzare
+        self.execution_lock = execution_lock
         # Internal state
         self.initialized = False
         self.prev_condition_candle = None
@@ -88,12 +86,8 @@ class Adrastea(TradingStrategy):
 
     @exception_handler
     async def bootstrap(self):
-        """
-        Metodo chiamato per inizializzare la strategia prima di processare le prime candele.
-        Ad esempio, carica candele storiche per inizializzare indicatori.
-        """
         async with self.execution_lock:
-            log_info("Bootstrap: inizializzazione della strategia.")
+            log_info("Bootstrap: initializing the strategy.")
             timeframe = self.config.get_timeframe()
             symbol = self.config.get_symbol()
             trading_direction = self.config.get_trading_direction()
@@ -102,7 +96,6 @@ class Adrastea(TradingStrategy):
             tot_candles_count = self.heikin_ashi_candles_buffer + bootstrap_rates_count + self.get_minimum_frames_count()
 
             try:
-
                 bootstrap_candles_logger = CandlesLogger(symbol, timeframe, trading_direction, custom_name='bootstrap')
 
                 candles = await execute_broker_call(
@@ -136,10 +129,7 @@ class Adrastea(TradingStrategy):
                 self.notify_state_change(candles, last_index)
                 self.initialized = True
             except Exception as e:
-                log_error(f"Errore nel bootstrap della strategia: {e}")
-
-                # Decidi come gestire l'errore: interrompere, continuare, ecc.
-                # Per ora, imposta initialized a False
+                log_error(f"Error in strategy bootstrap: {e}")
                 self.initialized = False
 
     def get_minimum_frames_count(self):
@@ -241,10 +231,9 @@ class Adrastea(TradingStrategy):
             notify_event(
                 f"5️⃣ ✅ <b>Condition 5 matched</b>: Final signal generated for {dir_str} trade. The current candle time {cur_candle_time} is from the candle following the last condition candle: {last_condition_candle_time}")
 
-    @exception_handler
-    async def on_new_candle(self, candle: dict):
+    async def on_new_tick(self, timeframe: Timeframe, timestamp: datetime):
         async with self.execution_lock:
-            log_info(f"Nuova candela ricevuta: {candle}")
+            log_info(f"New tick for {timeframe} at {timestamp}")
 
             timeframe = self.config.get_timeframe()
             symbol = self.config.get_symbol()
@@ -275,7 +264,7 @@ class Adrastea(TradingStrategy):
             log_debug(f"Checking signals - Results: should_enter={self.should_enter}, State={self.cur_state}, last_condition_candle={describe_candle(self.cur_condition_candle)}")
 
             last_candle_time_str = f"{last_candle['time_open'].strftime('%Y-%m-%d %H:%M:%S')} - {last_candle['time_close'].strftime('%Y-%m-%d %H:%M:%S')}"
-            # log_candle(last_candle)
+            # self.log_candle(last_candle)
 
             self.notify_state_change(candles, len(candles) - 1)
 
@@ -283,12 +272,11 @@ class Adrastea(TradingStrategy):
                 log_debug("Condition satisfied for placing an order. Sending entry signal notification.")
                 order_type_enter = OpType.BUY if trading_direction == TradingDirection.LONG else OpType.SELL
                 log_debug(f"Determined order type as {order_type_enter.label}.")
-                # send_entry_signal_notification(datetime.now(), order_type_enter)
                 log_info(f"Condition satisfied for candle {last_candle_time_str}, entry signal sent.")
                 log_debug("Processing order placement due to trading signal.")
 
                 if self.check_signal_confirmation_and_place_order(self.prev_condition_candle):
-                    order = self.prepare_order_to_place(last_candle)
+                    order = await self.prepare_order_to_place(last_candle)
                     await self.place_order(order)
             else:
                 log_info(f"No condition satisfied for candle {last_candle_time_str}")
@@ -301,7 +289,7 @@ class Adrastea(TradingStrategy):
                 log_error(f"Error while generating analysis data: {e}")
 
     @exception_handler
-    async def prepare_order_to_place(self, cur_candle: Series) -> TradeOrder:
+    async def prepare_order_to_place(self, cur_candle: Series) -> TradeOrder | None:
         log_debug("[place_order] Starting the function.")
 
         symbol = self.config.get_symbol()
@@ -341,7 +329,7 @@ class Adrastea(TradingStrategy):
         if volume < volume_min:
             log_warning(f"[place_order] Volume of {volume} is less than minimum of {volume_min}")
             self.send_message_with_details(f"❗ Volume of {volume} is less than the minimum of {volume_min} for {symbol}.")
-            return False
+            return None
 
         return TradeOrder(order_type=order_type_enter,
                           symbol=symbol,
@@ -498,38 +486,36 @@ class Adrastea(TradingStrategy):
             symbol = self.config.get_symbol()
             if is_open:
                 log_info(f"Market for {symbol} has opened.")
-                self.send_message_with_details(f"🔔 Market for {symbol} has just <b>opened</b>. Resuming trading activities.")
+                self.send_message_with_details(f"⏰ Market for {symbol} has just <b>opened</b>. Resuming trading activities.")
             else:
                 log_info(f"Market for {symbol} has closed.")
-                self.send_message_with_details(f"🔔 Market for {symbol} has just <b>closed</b>. Pausing trading activities.")
+                self.send_message_with_details(f"⏸️ Market for {symbol} has just <b>closed</b>. Pausing trading activities.")
 
     @exception_handler
-    async def on_deal_closed(self, position: Deal):
+    async def on_deal_closed(self, position: Position):
         async with self.execution_lock:
             log_info(f"Deal closed: {position}")
 
-            # Skip opening deals
-            if position.profit == 0:
-                log_info(f"Skipping open deal {position}.")
-                return
+            for deal in position.deals:
+                if deal.order_source not in [OrderSource.STOP_LOSS, OrderSource.TAKE_PROFIT]:
+                    log_info(f"Skipping deal with ticket {deal.ticket} as it is not a stop loss or take profit.")
+                    continue
 
-            # Log the trade details
-            log_info(f"Trade closed:\n{position}")
+            log_info(f"Deal closed:\n{deal}")
 
-            # Determine emoji based on profit
-            emoji = "🤑" if position.profit > 0 else "😔"
+            emoji = "🤑" if deal.profit > 0 else "😔"
 
-            # Format the trade details for notification
             trade_details = (
-                f"<b>Position ID:</b> {position.ticket}\n"
-                f"<b>Timestamp:</b> {position.time.strftime('%d/%m/%Y %H:%M:%S')}\n"
-                f"<b>Symbol:</b> {position.symbol}\n"
-                f"<b>Volume:</b> {position.volume}\n"
-                f"<b>Price:</b> {position.price_open}\n"
-                f"<b>Stop Loss/Take Profit:</b> {'SL' if 'sl' in position.comment.lower() else 'TP'}\n"
-                f"<b>Profit:</b> {position.profit}\n"
+                f"<b>Position ID:</b> {position.position_id}\n"
+                f"<b>Timestamp:</b> {deal.time.strftime('%d/%m/%Y %H:%M:%S')}\n"
+                f"<b>Symbol:</b> {deal.symbol}\n"
+                f"<b>Volume:</b> {deal.volume}\n"
+                f"<b>Price:</b> {deal.price}\n"
+                f"<b>Stop Loss/Take Profit:</b> {deal.order_source.value}\n"
+                f"<b>Profit/Loss:</b> {deal.profit}\n"
                 f"<b>Commission:</b> {position.commission}\n"
-                f"<b>Swap:</b> {position.swap}"
+                f"<b>Swap:</b> {deal.swap}"
+                f"<b>Fee:</b> {deal.fee}"
             )
 
             # Send notification via Telegram
@@ -541,11 +527,16 @@ class Adrastea(TradingStrategy):
             log_info(f"Economic event occurred: {event_info}")
 
             event_name = event_info.get('event_name', 'Unknown Event')
+            minutes_until_event = int(event_info.get('seconds_until_event', 1) / 60)
             symbol, magic_number = (self.config.get_symbol(), self.config.get_bot_magic_number())
+
+            message = (
+                f"📰🔔 Economic event <b>{event_name}</b> is scheduled to occur in {minutes_until_event} minutes.\n"
+            )
 
             positions: List[Deal] = await execute_broker_call(
                 self.broker.get_open_positions,
-                symbol=symbol, magic_number=magic_number
+                symbol=symbol
             )
 
             if not positions:

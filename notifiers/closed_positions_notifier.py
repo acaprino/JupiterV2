@@ -54,7 +54,7 @@ class ClosedPositionNotifier:
     async def _run(self):
         while self._running:
             try:
-                await asyncio.sleep(self.interval_seconds)  # Sleep asynchronously
+                await asyncio.sleep(self.interval_seconds)
 
                 if not await execute_broker_call(self.broker.get_market_status, self.symbol):
                     log_debug(f"Market for {self.symbol} is closed. Skipping monitoring.")
@@ -65,15 +65,15 @@ class ClosedPositionNotifier:
 
                 log_debug(f"Monitoring orders between {self.last_check_timestamp} and {current_time_utc}")
 
-                deals = await execute_broker_call(self.broker.get_deals, self.last_check_timestamp, current_time_utc, self.symbol, self.magic_number)
+                closed_positions = await execute_broker_call(self.broker.get_historical_positions, self.last_check_timestamp, current_time_utc, self.symbol, self.magic_number)
 
                 self.last_check_timestamp = current_time_utc
 
-                if not deals:
-                    log_debug(f"No closed deals found in the interval.")
+                if not closed_positions:
+                    log_debug(f"No closed positions found in the interval.")
                     continue
 
-                for position in deals:
+                for position in closed_positions:
                     tasks = [callback(position) for callback in self._on_deal_status_change_event_callbacks]
                     await asyncio.gather(*tasks, return_exceptions=True)
                     log_debug(f"Callbacks notified for position: {position}")

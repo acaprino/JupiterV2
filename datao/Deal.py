@@ -14,7 +14,6 @@ class Deal:
     position_id: int
     volume: float
     price: float
-    price_open: float
     commission: float
     swap: float
     profit: float

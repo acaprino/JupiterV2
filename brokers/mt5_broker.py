@@ -374,14 +374,14 @@ class MT5Broker(BrokerAPI):
 
         return positions_dict
 
-    def close_position(self, position: Deal, comment: Optional[str] = None, magic_number: Optional[int] = None) -> RequestResult:
+    def close_position(self, position: Position, comment: Optional[str] = None, magic_number: Optional[int] = None) -> RequestResult:
         filling_mode = self.find_filling_mode(position.symbol)
 
         close_request = {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": position.symbol,
             "volume": position.volume,
-            "type": mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY,
+            "type": mt5.ORDER_TYPE_SELL if position.position_type == PositionType.LONG else mt5.ORDER_TYPE_BUY,
             "position": position.ticket,
             "magic": magic_number,
             "comment": comment,
