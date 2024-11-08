@@ -60,8 +60,8 @@ async def main(config_file: str):
     closed_deals_notifier.register_on_deal_status_notifier(strategy.on_deal_closed)
 
     current_time_utc = now_utc()
-    deals = await execute_broker_call(broker.get_open_positions, config.get_symbol(), None)
-    positions = await execute_broker_call(broker.get_positions, current_time_utc - timedelta(days=100), current_time_utc, config.get_symbol(), None)
+    open_positions = await execute_broker_call(broker.get_open_positions, config.get_symbol())
+    positions = await execute_broker_call(broker.get_historical_positions, current_time_utc - timedelta(days=100), current_time_utc, config.get_symbol(), None)
 
     # Execute the strategy bootstrap method
     await strategy.bootstrap()

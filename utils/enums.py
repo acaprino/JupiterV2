@@ -98,6 +98,11 @@ class DealType(Enum):
     SELL = "SELL"
     OTHER = "OTHER"
 
+class PositionType(Enum):
+    LONG = "LONG"
+    SHORT = "SHORT"
+    OTHER = "OTHER"
+
 class OrderSource(Enum):
     STOP_LOSS = "Stop Loss"
     TAKE_PROFIT = "Take Profit"
