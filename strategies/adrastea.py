@@ -78,6 +78,7 @@ class Adrastea(TradingStrategy):
         self.prev_state = None
         self.cur_state = None
         self.should_enter = False
+        self.market_open = False
         self.heikin_ashi_candles_buffer = int(1000 * config.get_timeframe().to_hours())
         self.telegram = TelegramBotWrapper(config.get_telegram_token())
 
@@ -240,7 +241,12 @@ class Adrastea(TradingStrategy):
                 f"5️⃣ ✅ <b>Condition 5 matched</b>: Final signal generated for {dir_str} trade. The current candle time {cur_candle_time} is from the candle following the last condition candle: {last_condition_candle_time}")
 
     async def on_new_tick(self, timeframe: Timeframe, timestamp: datetime):
+        await asyncio.sleep(5)  # Wait for the candles and market status to be updated
         async with self.execution_lock:
+            if not self.market_open:
+                log_info("Market is closed. Skipping tick processing.")
+                return
+
             log_info(f"New tick for {timeframe} at {timestamp}")
 
             candles_count = self.heikin_ashi_candles_buffer + self.get_minimum_frames_count()
@@ -473,14 +479,14 @@ class Adrastea(TradingStrategy):
     @exception_handler
     async def on_market_status_change(self, is_open: bool, closing_time: float, opening_time: float, initializing: bool):
         async with self.execution_lock:
-            log_info(f"Stato del mercato cambiato: aperto={is_open}, chiusura={closing_time}, apertura={opening_time}")
             symbol = self.config.get_symbol()
+            self.market_open = is_open
             if is_open:
                 log_info(f"Market for {symbol} has opened.")
-                self.send_message_with_details(f"⏰ Market for {symbol} has just <b>opened</b>. Resuming trading activities.")
+                if not initializing: self.send_message_with_details(f"⏰ Market for {symbol} has just <b>opened</b>. Resuming trading activities.")
             else:
                 log_info(f"Market for {symbol} has closed.")
-                self.send_message_with_details(f"⏸️ Market for {symbol} has just <b>closed</b>. Pausing trading activities.")
+                if not initializing: self.send_message_with_details(f"⏸️ Market for {symbol} has just <b>closed</b>. Pausing trading activities.")
 
     @exception_handler
     async def on_deal_closed(self, position: Position):
