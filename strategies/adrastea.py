@@ -82,13 +82,22 @@ class Adrastea(TradingStrategy):
         self.telegram = TelegramBotWrapper(config.get_telegram_token())
         self.allow_last_tick = False
         self.telegram.start()
+        self.market_open_event = asyncio.Event()
         self.telegram.add_command_callback_handler(self.signal_confirmation_handler)
         self.live_candles_logger = CandlesLogger(config.get_symbol(), config.get_timeframe(), config.get_trading_direction(), custom_name='live')
 
     @exception_handler
-    async def bootstrap(self):
+    async def initialize(self):
         async with self.execution_lock:
-            log_info("Bootstrap: initializing the strategy.")
+            log_info("Initializing the strategy.")
+
+            market_is_open = await execute_broker_call(self.broker.is_market_open, self.config.get_symbol())
+            if not market_is_open:
+                log_info("Market is closed, waiting for it to open.")
+
+            await self.market_open_event.wait()
+            log_info("Market is open, proceeding with strategy bootstrap.")
+
             timeframe = self.config.get_timeframe()
             symbol = self.config.get_symbol()
             trading_direction = self.config.get_trading_direction()
@@ -246,9 +255,11 @@ class Adrastea(TradingStrategy):
             time_ref = opening_time if is_open else closing_time
             log_info(f"Market for {symbol} has {'opened' if is_open else 'closed'} at {unix_to_datetime(time_ref)}.")
             if is_open:
+                self.market_open_event.set()
                 if not initializing:
                     self.send_message_with_details(f"⏰ Market for {symbol} has just <b>opened</b>. Resuming trading activities.")
             else:
+                self.market_open_event.clear()
                 if not initializing:
                     log_info("Allowing the last tick to be processed before fully closing the market.")
                     self.allow_last_tick = True
@@ -258,8 +269,13 @@ class Adrastea(TradingStrategy):
     async def on_new_tick(self, timeframe: Timeframe, timestamp: datetime):
         async with self.execution_lock:
 
-            if not self.broker.is_market_open(self.config.get_symbol()) and not self.allow_last_tick:
+            market_is_open = await execute_broker_call(self.broker.is_market_open, self.config.get_symbol())
+            if not market_is_open and not self.allow_last_tick:
                 log_info("Market is closed, skipping tick processing.")
+                return
+
+            if not self.initialized:
+                log_info("Strategy not initialized, skipping tick processing.")
                 return
 
             candles_count = self.heikin_ashi_candles_buffer + self.get_minimum_frames_count()

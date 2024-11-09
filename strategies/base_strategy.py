@@ -14,7 +14,7 @@ class TradingStrategy(ABC):
     """
 
     @abstractmethod
-    async def bootstrap(self):
+    async def initialize(self):
         """
         Method called to initialize the strategy before processing the first candles.
         """

@@ -66,7 +66,7 @@ async def main(config_file: str):
 
     # Execute the strategy bootstrap method
     if not TEST_MODE:
-        await strategy.bootstrap()
+        await asyncio.create_task(strategy.initialize())
     await market_state_notifier.start()
     await tick_notifier.start()
     await economic_event_notifier.start()
