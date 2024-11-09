@@ -115,7 +115,7 @@ class MT5Broker(BrokerAPI):
 
         if symbol_info.trade_mode == mt5.SYMBOL_TRADE_MODE_DISABLED:
             log_warning(f"Market closed for {symbol}. Cannot get the broker server timezone offset.")
-            return 0
+            return None
 
         # Get the current broker time and UTC time to calculate offset
         broker_time = symbol_info.time

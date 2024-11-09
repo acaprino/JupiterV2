@@ -33,7 +33,7 @@ class BrokerAPI(ABC):
         pass
 
     @abstractmethod
-    def get_broker_timezone_offset(self, symbol) -> int:
+    def get_broker_timezone_offset(self, symbol) -> Optional[int]:
         pass
 
     @abstractmethod
