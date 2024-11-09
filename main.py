@@ -18,9 +18,8 @@ from utils.logger import log_init, log_info, log_error
 
 from utils.async_executor import executor
 from utils.mongo_db import MongoDB
-from utils.utils_functions import now_utc
 
-TEST_MODE = True
+TEST_MODE = False
 
 
 async def main(config_file: str):
@@ -47,7 +46,12 @@ async def main(config_file: str):
 
     # Initialize the MarketStateNotifier
     tick_notifier = TickNotifier(timeframe=config.get_timeframe(), execution_lock=execution_lock)
-    market_state_notifier = MarketStateNotifier(broker, config.get_symbol(), execution_lock) if not TEST_MODE else MockMarketStateNotifier(broker, config.get_symbol(), execution_lock)
+
+    if TEST_MODE:
+        market_state_notifier = MockMarketStateNotifier(broker, config.get_symbol(), execution_lock)
+    else:
+        market_state_notifier = MarketStateNotifier(broker, config.get_symbol(), execution_lock)
+
     economic_event_notifier = EconomicEventNotifier(broker, symbol=config.get_symbol(), execution_lock=execution_lock)
     closed_deals_notifier = ClosedPositionNotifier(broker, symbol=config.get_symbol(), magic_number=config.get_bot_magic_number(), execution_lock=execution_lock)
 
@@ -59,8 +63,6 @@ async def main(config_file: str):
     market_state_notifier.register_on_market_status_change(strategy.on_market_status_change)
     economic_event_notifier.register_on_economic_event(strategy.on_economic_event)
     closed_deals_notifier.register_on_deal_status_notifier(strategy.on_deal_closed)
-
-    current_time_utc = now_utc()
 
     # Execute the strategy bootstrap method
     if not TEST_MODE:
