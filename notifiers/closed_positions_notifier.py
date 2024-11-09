@@ -20,9 +20,7 @@ class ClosedPositionNotifier:
         self.symbol = symbol
         self.magic_number = magic_number
         self.execution_lock = execution_lock
-
         self.interval_seconds = 60 * 5
-        self.last_check_timestamp = None
         self._running = False
         self._task = None
         self._on_deal_status_change_event_callbacks: List[Callable[[Deal], Awaitable[None]]] = []
@@ -35,7 +33,9 @@ class ClosedPositionNotifier:
 
             # Set the initial last check timestamp adjusted to broker's timezone
             timezone_offset = await execute_broker_call(self.broker.get_broker_timezone_offset, self.symbol)
-            self.last_check_timestamp = now_utc() - timedelta(hours=timezone_offset)
+            if timezone_offset is not None:
+                self.last_check_timestamp = now_utc() - timedelta(hours=timezone_offset)
+                self.started_with_closed_marked = True
 
             log_info(f"ClosedPositionNotifier started for symbol: {self.symbol}")
 
@@ -55,6 +55,8 @@ class ClosedPositionNotifier:
     @exception_handler
     async def _run(self):
         """Main loop to periodically check for closed positions and trigger callbacks if any are found."""
+        exception = False
+        exception_retry_seconds = 10
         while self._running:
             try:
                 await asyncio.sleep(self.interval_seconds)
@@ -66,21 +68,24 @@ class ClosedPositionNotifier:
 
                 # Adjust current time to broker's timezone and set check interval
                 timezone_offset = await execute_broker_call(self.broker.get_broker_timezone_offset, self.symbol)
-                current_time_utc = now_utc() - timedelta(hours=timezone_offset)
+                now = now_utc()
+                prev_check_timestamp = now - timedelta(seconds=self.interval_seconds) - timedelta(hours=timezone_offset)
+                if exception:
+                    prev_check_timestamp = prev_check_timestamp - timedelta(seconds=exception_retry_seconds)
+                    exception = False
 
-                log_debug(f"Checking for closed positions between {self.last_check_timestamp} and {current_time_utc}.")
+                current_time_utc = now - timedelta(hours=timezone_offset)
+
+                log_debug(f"Checking for closed positions between {prev_check_timestamp} and {current_time_utc}.")
 
                 # Retrieve closed positions within the time interval
                 closed_positions = await execute_broker_call(
                     self.broker.get_historical_positions,
-                    self.last_check_timestamp,
+                    prev_check_timestamp,
                     current_time_utc,
                     self.symbol,
                     self.magic_number
                 )
-
-                # Update last check timestamp to the current time
-                self.last_check_timestamp = current_time_utc
 
                 if not closed_positions:
                     log_debug("No closed positions found in this interval.")
@@ -94,7 +99,8 @@ class ClosedPositionNotifier:
 
             except Exception as e:
                 log_error(f"Error in ClosedPositionNotifier loop: {e}")
-                await asyncio.sleep(5)  # Short delay before retrying in case of error
+                exception = True
+                await asyncio.sleep(exception_retry_seconds)
 
     async def stop(self):
         """Stops the closed position notifier by canceling the monitoring task."""
