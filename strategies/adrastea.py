@@ -912,7 +912,10 @@ class Adrastea(TradingStrategy):
 
         choice_text = "✅ Confirm" if confirmed else "🚫 Ignore"
 
-        message = f"ℹ️ Your choice to <b>{choice_text}</b> the signal for the candle from {open_dt_datetime} to {close_dt_datetime} has been successfully saved."
+        open_dt_formatted = open_dt_datetime.strftime('%Y-%m-%d %H:%M:%S UTC')
+        close_dt_formatted = close_dt_datetime.strftime('%Y-%m-%d %H:%M:%S UTC')
+
+        message = f"ℹ️ Your choice to <b>{choice_text}</b> the signal for the candle from {open_dt_formatted} to {close_dt_formatted} has been successfully saved."
         self.send_message(message)
         log_debug(f"Confirmation message sent: {message}")
 
