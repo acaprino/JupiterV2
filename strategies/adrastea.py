@@ -258,7 +258,7 @@ class Adrastea(TradingStrategy):
     async def on_new_tick(self, timeframe: Timeframe, timestamp: datetime):
         async with self.execution_lock:
 
-            if not self.broker.is_market_open(self.config.get_symbol()):
+            if not self.broker.is_market_open(self.config.get_symbol()) and not self.allow_last_tick:
                 log_info("Market is closed, skipping tick processing.")
                 return
 
@@ -292,6 +292,9 @@ class Adrastea(TradingStrategy):
                     await self.place_order(order)
             else:
                 log_info(f"No condition satisfied for candle {describe_candle(last_candle)}")
+
+            if self.allow_last_tick:
+                self.allow_last_tick = False
 
             try:
                 self.live_candles_logger.add_candle(last_candle)
