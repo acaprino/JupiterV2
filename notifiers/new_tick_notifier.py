@@ -73,10 +73,8 @@ class TickNotifier:
         time_to_next_candle = timeframe_duration - (current_time % timeframe_duration)
         next_candle_time = unix_to_datetime(current_time + time_to_next_candle).replace(microsecond=0)
 
-        log_debug(f"Waiting for next candle: current time {now}, duration until next tick: {time_to_next_candle} seconds.")
-        log_info(f"Next tick expected at {next_candle_time}")
+        log_debug(f"Waiting for next candle, current time {now}, {time_to_next_candle} seconds until next tick.")
 
         await asyncio.sleep(time_to_next_candle)
 
-        log_debug(f"Wait for next tick completed. Current time: {now_utc()}")
         return next_candle_time

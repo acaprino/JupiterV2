@@ -3,11 +3,13 @@ import argparse
 import asyncio
 import sys
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 
 from brokers.broker_interface import BrokerAPI
 from notifiers.closed_positions_notifier import ClosedPositionNotifier
 from notifiers.economic_event_notifier import EconomicEventNotifier
 from notifiers.market_state_notifier import MarketStateNotifier
+from notifiers.mock_market_state_notifier import MockMarketStateNotifier
 from notifiers.new_tick_notifier import TickNotifier
 from strategies.adrastea import Adrastea
 from brokers.mt5_broker import MT5Broker
@@ -17,6 +19,8 @@ from utils.logger import log_init, log_info, log_error
 from utils.async_executor import executor
 from utils.mongo_db import MongoDB
 from utils.utils_functions import now_utc
+
+TEST_MODE = True
 
 
 async def main(config_file: str):
@@ -43,7 +47,7 @@ async def main(config_file: str):
 
     # Initialize the MarketStateNotifier
     tick_notifier = TickNotifier(timeframe=config.get_timeframe(), execution_lock=execution_lock)
-    market_state_notifier = MarketStateNotifier(broker, config.get_symbol(), execution_lock)
+    market_state_notifier = MarketStateNotifier(broker, config.get_symbol(), execution_lock) if not TEST_MODE else MockMarketStateNotifier(broker, config.get_symbol(), execution_lock)
     economic_event_notifier = EconomicEventNotifier(broker, symbol=config.get_symbol(), execution_lock=execution_lock)
     closed_deals_notifier = ClosedPositionNotifier(broker, symbol=config.get_symbol(), magic_number=config.get_bot_magic_number(), execution_lock=execution_lock)
 
@@ -59,7 +63,8 @@ async def main(config_file: str):
     current_time_utc = now_utc()
 
     # Execute the strategy bootstrap method
-    await strategy.bootstrap()
+    if not TEST_MODE:
+        await strategy.bootstrap()
     await market_state_notifier.start()
     await tick_notifier.start()
     await economic_event_notifier.start()
@@ -73,6 +78,7 @@ async def main(config_file: str):
         log_info("Keyboard interruption detected. Stopping the bot...")
     finally:
         # Stop the providers and close the broker connection
+        await strategy.shutdown()
         await market_state_notifier.stop()
         await tick_notifier.stop()
         await economic_event_notifier.stop()
@@ -99,4 +105,8 @@ if __name__ == "__main__":
 
     print(f"Config file: {config_file_param}")
 
-    asyncio.run(main(config_file_param))
+    executor = ThreadPoolExecutor(max_workers=20)
+    loop = asyncio.new_event_loop()
+    loop.set_default_executor(executor)
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(main(config_file_param))

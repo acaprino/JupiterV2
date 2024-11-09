@@ -9,7 +9,7 @@
   },
   "live": {
     "symbol": "EURUSD",
-    "timeframe": "H1",
+    "timeframe": "M1",
     "trading_direction": "LONG"
   },
   "bot": {

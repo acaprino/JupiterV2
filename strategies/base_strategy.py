@@ -63,3 +63,11 @@ class TradingStrategy(ABC):
             event_info (dict): Information about the economic event.
         """
         pass  # strategies/base_strategy.py
+
+
+    @abstractmethod
+    async def shutdown(self):
+        """
+        Method called to shutdown the strategy.
+        """
+        pass

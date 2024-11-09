@@ -1,8 +1,11 @@
 # strategies/my_strategy.py
 import asyncio
+import itertools
 import math
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Tuple, Optional
+from enum import Enum
+from typing import List, Tuple, Optional, Any
 
 import numpy as np
 import pandas as pd
@@ -26,7 +29,7 @@ from brokers.broker_interface import BrokerAPI
 from utils.logger import log_info, log_error, log_debug, log_warning
 from utils.mongo_db import MongoDB
 from utils.telegram_lib import TelegramBotWrapper
-from utils.utils_functions import describe_candle, now_utc, round_to_step, round_to_point, dt_to_unix, unix_to_datetime
+from utils.utils_functions import describe_candle, now_utc, round_to_step, round_to_point, dt_to_unix
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
@@ -62,6 +65,25 @@ stoch_k_key = STOCHASTIC_K + '_' + str(stoch_k_period) + '_' + str(stoch_d_perio
 stoch_d_key = STOCHASTIC_D + '_' + str(stoch_k_period) + '_' + str(stoch_d_period) + '_' + str(stoch_smooth_k)
 
 
+class EventType(Enum):
+    MARKET_STATUS_CHANGE = 1  # Priorità più alta
+    TICK = 2
+    SHUTDOWN = 3  # Priorità più bassa
+
+
+@dataclass(order=True)
+class PrioritizedItem:
+    priority: int
+    count: int = field(compare=False)
+    event: Any = field(compare=False)
+
+
+@dataclass
+class Event:
+    type: EventType
+    data: Any
+
+
 class Adrastea(TradingStrategy):
     """
     Implementazione concreta della strategia di trading.
@@ -78,12 +100,20 @@ class Adrastea(TradingStrategy):
         self.prev_state = None
         self.cur_state = None
         self.should_enter = False
+
         self.heikin_ashi_candles_buffer = int(1000 * config.get_timeframe().to_hours())
         self.telegram = TelegramBotWrapper(config.get_telegram_token())
-        self.allow_last_tick = False
+
         self.telegram.start()
         self.telegram.add_command_callback_handler(self.signal_confirmation_handler)
         self.live_candles_logger = CandlesLogger(config.get_symbol(), config.get_timeframe(), config.get_trading_direction(), custom_name='live')
+
+        self.market_open = False
+        self.event_queue = asyncio.PriorityQueue()
+        self._counter = itertools.count()
+        self.sentinel = PrioritizedItem(priority=EventType.SHUTDOWN.value, count=next(self._counter), event=Event(type=EventType.SHUTDOWN, data=None))
+
+        asyncio.create_task(self.process_events())
 
     @exception_handler
     async def bootstrap(self):
@@ -241,26 +271,88 @@ class Adrastea(TradingStrategy):
 
     @exception_handler
     async def on_market_status_change(self, is_open: bool, closing_time: float, opening_time: float, initializing: bool):
-        async with self.execution_lock:
-            symbol = self.config.get_symbol()
-            time_ref = opening_time if is_open else closing_time
-            log_info(f"Market for {symbol} has {'opened' if is_open else 'closed'} at {unix_to_datetime(time_ref)}.")
-            if is_open:
-                if not initializing:
-                    self.send_message_with_details(f"⏰ Market for {symbol} has just <b>opened</b>. Resuming trading activities.")
-            else:
-                if not initializing:
-                    log_info("Allowing the last tick to be processed before fully closing the market.")
-                    self.allow_last_tick = True
-                    self.send_message_with_details(f"⏸️ Market for {symbol} has just <b>closed</b>. Pausing trading activities.")
+        event = Event(type=EventType.MARKET_STATUS_CHANGE, data={
+            'is_open': is_open,
+            'closing_time': closing_time,
+            'opening_time': opening_time,
+            'initializing': initializing
+        })
+        prioritized_event = PrioritizedItem(priority=event.type.value, event=event)
+        await self.event_queue.put(prioritized_event)
+        log_info(f"Market status change event enqueued: {'Open' if is_open else 'Closed'} at {datetime.now()}.")
+
+    @exception_handler
+    async def on_market_status_change(self, is_open: bool, closing_time: float, opening_time: float, initializing: bool):
+        event = Event(type=EventType.MARKET_STATUS_CHANGE, data={
+            'is_open': is_open,
+            'closing_time': closing_time,
+            'opening_time': opening_time,
+            'initializing': initializing
+        })
+        prioritized_event = PrioritizedItem(priority=event.type.value, count=next(self._counter), event=event)
+        await self.event_queue.put(prioritized_event)
+        log_info(f"Market status change event enqueued: {'Open' if is_open else 'Closed'} at {datetime.now()}.")
 
     @exception_handler
     async def on_new_tick(self, timeframe: Timeframe, timestamp: datetime):
-        async with self.execution_lock:
+        event = Event(type=EventType.TICK, data={
+            'timeframe': timeframe,
+            'timestamp': timestamp
+        })
+        prioritized_event = PrioritizedItem(priority=event.type.value, count=next(self._counter), event=event)
+        await self.event_queue.put(prioritized_event)
+        log_info(f"Tick event enqueued for {timeframe.name} at {timestamp}.")
 
-            if not self.broker.is_market_open(self.config.get_symbol()):
-                log_info("Market is closed, skipping tick processing.")
+    async def process_events(self):
+        while True:
+            prioritized_event = await self.event_queue.get()
+            event = prioritized_event.event
+            log_debug(f"Processing event: {event}")
+            if event.type == EventType.SHUTDOWN:
+                log_info("Received shutdown signal. Processing remaining events before shutting down.")
+                while not self.event_queue.empty():
+                    remaining_prioritized_event = await self.event_queue.get()
+                    remaining_event = remaining_prioritized_event.event
+                    await self.handle_event(remaining_event)
+                    self.event_queue.task_done()
+                log_info("All events processed. Shutting down event processor.")
+                self.event_queue.task_done()
+                break
+            else:
+                await self.handle_event(event)
+                self.event_queue.task_done()
+
+    async def handle_event(self, event: Event):
+        if event.type == EventType.MARKET_STATUS_CHANGE:
+            await self.handle_market_status_change(event.data)
+        elif event.type == EventType.TICK:
+            await self.handle_tick(event.data['timeframe'], event.data['timestamp'])
+
+    async def handle_market_status_change(self, data: dict):
+        async with self.execution_lock:
+            self.market_open = data['is_open']
+            symbol = self.config.get_symbol()
+            if data['is_open']:
+                log_info(f"Market for {symbol} has opened at {datetime.now()}.")
+                if not data['initializing']:
+                    self.send_message_with_details(f"⏰ Market for {symbol} has just <b>opened</b>. Resuming trading activities.")
+            else:
+                log_info(f"Market for {symbol} has closed at {datetime.now()}.")
+                if not data['initializing']:
+                    self.send_message_with_details(f"⏸️ Market for {symbol} has just <b>closed</b>. Pausing trading activities.")
+                # Invia il segnale di chiusura alla coda
+                #await self.event_queue.put(self.sentinel)
+
+    async def handle_tick(self, timeframe: Timeframe, timestamp: datetime):
+        # Attendi fino all'apertura del mercato, bloccante fino a che market_open_event non è impostato
+
+        # Sincronizza l'esecuzione per evitare conflitti
+        async with self.execution_lock:
+            if not self.market_open:
+                log_info("Market is closed. Skipping tick processing.")
                 return
+
+            log_info(f"New tick for {timeframe} at {timestamp}")
 
             candles_count = self.heikin_ashi_candles_buffer + self.get_minimum_frames_count()
 
@@ -300,6 +392,8 @@ class Adrastea(TradingStrategy):
 
     @exception_handler
     async def prepare_order_to_place(self, cur_candle: Series) -> TradeOrder | None:
+        log_debug("[place_order] Starting the function.")
+
         symbol = self.config.get_symbol()
         trading_direction = self.config.get_trading_direction()
         order_type_enter = OpType.BUY if trading_direction == TradingDirection.LONG else OpType.SELL
@@ -910,4 +1004,8 @@ class Adrastea(TradingStrategy):
 
     @exception_handler
     async def shutdown(self):
-        log_info("Shutting down the bot.")
+        log_info("Initiating shutdown sequence.")
+        await self.event_queue.put(self.sentinel)
+        # Attendi che tutti gli eventi vengano processati
+        await self.event_queue.join()
+        log_info("Shutdown sequence complete.")

@@ -1,15 +1,15 @@
 import asyncio
+import random
 import time
 from datetime import datetime
 from typing import Callable, Awaitable, List, Optional
 
 from brokers.broker_interface import BrokerAPI
-from utils.async_executor import execute_broker_call
 from utils.error_handler import exception_handler
 from utils.logger import log_info, log_error, log_debug
 
 
-class MarketStateNotifier:
+class MockMarketStateNotifier:
     """
     Monitors and notifies registered callbacks of changes in the market's open/closed state for a specific symbol.
     """
@@ -18,8 +18,8 @@ class MarketStateNotifier:
         self.broker = broker
         self.symbol = symbol
         self.execution_lock = execution_lock
-        self.check_interval_minutes = 30
-        self._market_open: Optional[bool] = None
+        self.check_interval_minutes = 1
+        self._market_open: Optional[bool] = False
         self._running = False
         self._task = None
         self._initialized = False
@@ -77,15 +77,19 @@ class MarketStateNotifier:
         ]
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        log_info(f"Market state updated to {'open' if market_is_open else 'closed'} for {self.symbol}.")
 
     @exception_handler
     async def _run(self):
         """Continuously checks the market state at specified interval in minutes."""
         while self._running:
             try:
-                # Call broker to check if the market is open
-                market_is_open = await execute_broker_call(self.broker.is_market_open, self.symbol)
+                #  Mock implementation of BrokerAPI that simulates the market being open or closed randomly.
+
+                _market_open_old = self._market_open
+                market_is_open = not self._market_open if random.random() < 0.5 else self._market_open
+
+                if _market_open_old != market_is_open:
+                    log_debug(f"Market state changed to {'open' if market_is_open else 'closed'}.")
 
                 # Initial state check or state change detection
                 if not self._initialized:
@@ -98,7 +102,6 @@ class MarketStateNotifier:
                 now = datetime.now()
                 seconds_until_next_interval = (self.check_interval_minutes - now.minute % self.check_interval_minutes) * 60 - now.second
 
-                log_debug(f"Market is {'open' if market_is_open else 'closed'} for {self.symbol}. Next check in {seconds_until_next_interval} seconds.")
                 await asyncio.sleep(seconds_until_next_interval)
             except Exception as e:
                 log_error(f"Error in MarketStateNotifier._run: {e}")
