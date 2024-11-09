@@ -1,7 +1,7 @@
 # strategies/my_strategy.py
 import asyncio
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Tuple, Optional
 
 import numpy as np
@@ -143,9 +143,10 @@ class Adrastea(TradingStrategy):
 
     def get_minimum_frames_count(self):
         return max(supertrend_fast_period,
-                   supertrend_fast_multiplier,
                    supertrend_slow_period,
-                   supertrend_slow_multiplier) + 1
+                   stoch_k_period,
+                   stoch_d_period,
+                   stoch_smooth_k) + 1
 
     def notify_state_change(self, rates, i):
         symbol, timeframe, trading_direction = (
@@ -349,7 +350,7 @@ class Adrastea(TradingStrategy):
             self.broker.get_account_leverage
         )
 
-        volume = self.get_volume(account_balance, symbol, leverage, price)
+        volume = self.get_volume(account_balance, symbol_info, leverage, price)
 
         log_info(f"[place_order] Account balance retrieved: {account_balance}, Leverage obtained: {leverage}, Calculated volume for the order on {symbol} at price {price}: {volume}")
 
@@ -847,6 +848,16 @@ class Adrastea(TradingStrategy):
         log_debug(
             f"Parsed data - bot_name: {bot_name}, magic: {magic}, open_dt: {open_dt}, close_dt: {close_dt}, confirmed: {confirmed}, user_username: {user_username}, user_id: {user_id}, chat_id: {chat_id}, chat_username: {chat_username}")
 
+        # Convert open_dt and close_dt to datetime objects
+
+        open_dt_datetime = unix_to_datetime(int(open_dt))
+        close_dt_datetime = unix_to_datetime(int(close_dt))
+        now = now_utc()
+        if now > close_dt_datetime + timedelta(seconds=self.config.get_timeframe().to_seconds()):
+            log_info(f"Signal from {open_dt_datetime} to {close_dt_datetime} is obsolete. Current time: {now}")
+            await query.edit_message_text("⚠️ This signal is obsolete and can no longer be confirmed or ignored.")
+            return
+
         # Create CSV formatted confirmation and blocking data
         csv_confirm = f"{bot_name},{magic},{open_dt},{close_dt},1"
         csv_block = f"{bot_name},{magic},{open_dt},{close_dt},0"
@@ -864,7 +875,7 @@ class Adrastea(TradingStrategy):
             keyboard = [
                 [
                     InlineKeyboardButton("Confirmed ✔️", callback_data=csv_confirm),
-                    InlineKeyboardButton("Blocked", callback_data=csv_block)
+                    InlineKeyboardButton("Ignored", callback_data=csv_block)
                 ]
             ]
         else:
@@ -900,7 +911,8 @@ class Adrastea(TradingStrategy):
         log_debug("Database updated with new signal confirmation")
 
         choice_text = "✅ Confirm" if confirmed else "🚫 Ignore"
-        message = f"ℹ️ Your choice to <b>{choice_text}</b> the signal for the candle from {open_dt} to {close_dt} has been successfully saved."
+
+        message = f"ℹ️ Your choice to <b>{choice_text}</b> the signal for the candle from {open_dt_datetime} to {close_dt_datetime} has been successfully saved."
         self.send_message(message)
         log_debug(f"Confirmation message sent: {message}")
 
@@ -909,8 +921,8 @@ class Adrastea(TradingStrategy):
         bot_name = ConfigReader().get_bot_name()
         magic = ConfigReader().get_bot_magic_number()
 
-        open_dt = candle['time_open'].strftime('%H:%M')
-        close_dt = candle['time_close'].strftime('%H:%M')
+        open_dt = dt_to_unix(candle['time_open'])
+        close_dt = dt_to_unix(candle['time_close'])
 
         csv_confirm = f"{bot_name},{magic},{open_dt},{close_dt},1"
         csv_block = f"{bot_name},{magic},{open_dt},{close_dt},0"
@@ -930,3 +942,4 @@ class Adrastea(TradingStrategy):
     @exception_handler
     async def shutdown(self):
         log_info("Shutting down the bot.")
+        await self.telegram.stop()
