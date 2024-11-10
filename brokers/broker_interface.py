@@ -5,9 +5,9 @@ from typing import Optional, List, Dict
 from pandas import Series
 
 from datao import SymbolInfo, TradeOrder, SymbolPrice
-from datao.Deal import Deal
-from datao.Position import Position
-from datao.RequestResult import RequestResult
+from dto.Deal import Deal
+from dto.Position import Position
+from dto.RequestResult import RequestResult
 
 
 class BrokerAPI(ABC):

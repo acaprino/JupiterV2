@@ -3,7 +3,7 @@ from datetime import timedelta
 from typing import List, Callable, Awaitable
 
 from brokers.broker_interface import BrokerAPI
-from datao.Deal import Deal
+from dto.Deal import Deal
 from utils.async_executor import execute_broker_call
 from utils.error_handler import exception_handler
 from utils.logger import Logger

@@ -10,11 +10,11 @@ from pandas import Series
 
 from csv_loggers.candles_logger import CandlesLogger
 from csv_loggers.strategy_events_logger import StrategyEventsLogger
-from datao.Deal import Deal
-from datao.Position import Position
-from datao.RequestResult import RequestResult
-from datao.SymbolInfo import SymbolInfo
-from datao.TradeOrder import TradeOrder
+from dto.Deal import Deal
+from dto.Position import Position
+from dto.RequestResult import RequestResult
+from dto.SymbolInfo import SymbolInfo
+from dto.TradeOrder import TradeOrder
 from strategies.base_strategy import TradingStrategy
 from strategies.indicators import supertrend, stochastic, average_true_range
 from utils.async_executor import execute_broker_call

@@ -7,12 +7,12 @@ import MetaTrader5 as mt5
 import pandas as pd
 
 from brokers.broker_interface import BrokerAPI
-from datao.Deal import Deal
-from datao.Position import Position
-from datao.RequestResult import RequestResult
-from datao.SymbolInfo import SymbolInfo
-from datao.SymbolPrice import SymbolPrice
-from datao.TradeOrder import TradeOrder
+from dto.Deal import Deal
+from dto.Position import Position
+from dto.RequestResult import RequestResult
+from dto.SymbolInfo import SymbolInfo
+from dto.SymbolPrice import SymbolPrice
+from dto.TradeOrder import TradeOrder
 from utils.config import ConfigReader
 from utils.enums import Timeframe, FillingType, OpType, DealType, OrderSource, PositionType
 from utils.logger import Logger

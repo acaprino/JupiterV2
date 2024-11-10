@@ -2,7 +2,7 @@ from dataclasses import field, dataclass
 from datetime import datetime
 from typing import List, Optional
 
-from datao.Deal import Deal
+from dto.Deal import Deal
 from utils.enums import PositionType, OrderSource
 
 
