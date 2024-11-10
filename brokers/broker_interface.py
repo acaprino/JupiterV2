@@ -4,7 +4,7 @@ from typing import Optional, List, Dict
 
 from pandas import Series
 
-from datao import SymbolInfo, TradeOrder, SymbolPrice
+from dto import SymbolInfo, TradeOrder, SymbolPrice
 from dto.Deal import Deal
 from dto.Position import Position
 from dto.RequestResult import RequestResult
