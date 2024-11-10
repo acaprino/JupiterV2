@@ -5,6 +5,41 @@ from typing import Dict, Any
 from utils.enums import TradingDirection, Timeframe, NotificationLevel
 from utils.utils_functions import string_to_enum
 
+required_structure = {
+    "enabled": bool,
+    "mt5": {
+        "timeout": int,
+        "account": int,
+        "password": str,
+        "server": str,
+        "mt5_path": str
+    },
+    "trading": {
+        "symbol": str,
+        "timeframe": str,
+        "trading_direction": str,
+        "risk_percent": float
+    },
+    "bot": {
+        "version": float,
+        "name": str,
+        "magic_number": int,
+        "symbols_db_sheet_id": str,
+        "logging_level": str
+    },
+    "telegram": {
+        "token": str,
+        "chat_ids": list,
+        "active": bool,
+        "notification_level": str
+    },
+    "mongo": {
+        "host": str,
+        "port": str,
+        "db_name": str
+    }
+}
+
 
 class ConfigReader:
     """
@@ -97,6 +132,8 @@ class ConfigReader:
         if not self.config:
             raise ValueError("Configurazione non caricata.")
 
+        self.check_structure(self.config, required_structure)
+
         # Inizializza la configurazione MetaTrader5
         self.metatrader5_config = self.config.get("mt5", {})
 
@@ -118,6 +155,18 @@ class ConfigReader:
 
         # Inizializza la configurazione MongoDB
         self.mongo_config = self.config.get("mongo", {})
+
+    def check_structure(self, data: Dict[str, Any], structure: Dict[str, Any], path=""):
+        for key, expected_type in structure.items():
+            full_path = f"{path}.{key}" if path else key
+            if key not in data:
+                raise ValueError(f"Missing key '{full_path}' in the configuration.")
+            if isinstance(expected_type, dict):
+                if not isinstance(data[key], dict):
+                    raise TypeError(f"Key '{full_path}' should be a dictionary.")
+                self.check_structure(data[key], expected_type, full_path)
+            elif not isinstance(data[key], expected_type):
+                raise TypeError(f"Key '{full_path}' should be of type {expected_type.__name__}.")
 
     # Metodi getter per ciascuna sezione di configurazione
 
