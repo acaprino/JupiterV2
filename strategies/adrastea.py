@@ -85,7 +85,7 @@ class Adrastea(TradingStrategy):
         self.telegram.start()
         self.market_open_event = asyncio.Event()
         self.telegram.add_command_callback_handler(self.signal_confirmation_handler)
-        self.live_candles_logger = CandlesLogger(config.get_symbol(), config.get_timeframe(), config.get_trading_direction(), custom_name='live')
+        self.live_candles_logger = CandlesLogger(config.get_symbol(), config.get_timeframe(), config.get_trading_direction())
 
     @exception_handler
     async def initialize(self):

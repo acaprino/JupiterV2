@@ -39,7 +39,7 @@ class CSVLogger:
 
         # Define paths and file names
         self.relative_output_path = output_path
-        self.full_output_path = f"output/{output_path}"
+        self.full_output_path = f"output/{output_path}" if output_path else "output"
         current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.file_name = f"{logger_name}_{current_time}.csv" if logger_name else None
         self.csv_file_path = os.path.join(self.full_output_path, self.file_name) if logger_name else None
