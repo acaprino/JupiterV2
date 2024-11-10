@@ -14,9 +14,9 @@ from notifiers.new_tick_notifier import TickNotifier
 from strategies.adrastea import Adrastea
 from brokers.mt5_broker import MT5Broker
 from utils.config import ConfigReader
-from utils.logger import log_init, log_info, log_error
 
 from utils.async_executor import executor
+from utils.logger import Logger
 from utils.mongo_db import MongoDB
 
 TEST_MODE = False
@@ -26,34 +26,35 @@ async def main(config_file: str):
     """
     Main function that starts the asynchronous trading bot.
     """
-    config = ConfigReader(config_file)
+    config = ConfigReader.load_config(config_file_param=config_file)
+    bot_name = config.get_bot_name()
 
+    logger = Logger.get_logger(bot_name)
     # Configure logging
     warnings.filterwarnings('ignore', category=FutureWarning)
-    log_init(config.get_bot_name(), config.get_bot_version(), config.get_bot_logging_level())
 
-    mongo_db = MongoDB(config.get_mongo_host(), config.get_mongo_port())
+    mongo_db = MongoDB(bot_name=bot_name, host=config.get_mongo_host(), port=config.get_mongo_port())
 
     if not mongo_db.test_connection():
-        log_error("MongoDB connection failed. Exiting...")
+        logger.error("MongoDB connection failed. Exiting...")
         return
 
     # Initialize the broker
-    broker: BrokerAPI = MT5Broker(config)
+    broker: BrokerAPI = MT5Broker(bot_name=bot_name)
 
     # Create the lock to synchronize executions
     execution_lock = asyncio.Lock()
 
     # Initialize the MarketStateNotifier
-    tick_notifier = TickNotifier(timeframe=config.get_timeframe(), execution_lock=execution_lock)
+    tick_notifier = TickNotifier(bot_name=bot_name, timeframe=config.get_timeframe(), execution_lock=execution_lock)
 
     if TEST_MODE:
-        market_state_notifier = MockMarketStateNotifier(broker, config.get_symbol(), execution_lock)
+        market_state_notifier = MockMarketStateNotifier(bot_name=bot_name, broker=broker, symbol=config.get_symbol(), execution_lock=execution_lock)
     else:
-        market_state_notifier = MarketStateNotifier(broker, config.get_symbol(), execution_lock)
+        market_state_notifier = MarketStateNotifier(bot_name=bot_name, broker=broker, symbol=config.get_symbol(), execution_lock=execution_lock)
 
-    economic_event_notifier = EconomicEventNotifier(broker, symbol=config.get_symbol(), execution_lock=execution_lock)
-    closed_deals_notifier = ClosedPositionNotifier(broker, symbol=config.get_symbol(), magic_number=config.get_bot_magic_number(), execution_lock=execution_lock)
+    economic_event_notifier = EconomicEventNotifier(bot_name=bot_name, broker=broker, symbol=config.get_symbol(), execution_lock=execution_lock)
+    closed_deals_notifier = ClosedPositionNotifier(bot_name=bot_name, broker=broker, symbol=config.get_symbol(), magic_number=config.get_bot_magic_number(), execution_lock=execution_lock)
 
     # Instantiate the strategy
     strategy = Adrastea(broker, config, execution_lock)
@@ -77,7 +78,7 @@ async def main(config_file: str):
         while True:
             await asyncio.sleep(1)
     except KeyboardInterrupt:
-        log_info("Keyboard interruption detected. Stopping the bot...")
+        logger.info("Keyboard interruption detected. Stopping the bot...")
     finally:
         # Stop the providers and close the broker connection
         await strategy.shutdown()
@@ -86,7 +87,7 @@ async def main(config_file: str):
         await economic_event_notifier.stop()
         await closed_deals_notifier.stop()
         broker.shutdown()
-        log_info("Program terminated.")
+        logger.info("Program terminated.")
 
         executor.shutdown()
 

@@ -2,74 +2,123 @@ import logging
 import inspect
 import os
 from logging.handlers import RotatingFileHandler
+from typing import Dict
 
-# Warning: Initialize ConfigReader with config file path before using this logger
-logger = None
+from utils.config import ConfigReader
 
 
-def log_init(bot_name: str, bot_version: str, level: str):
+class Logger:
     """
-    Initializes the logger with a rotating file handler.
-
-    Parameters:
-    - bot_name: Name of the bot to include in the logger's name and filename.
-    - bot_version: Version of the bot, used in the log filename.
-    - level: Logging level as a string (e.g., 'DEBUG', 'INFO').
+    A Logger class implementing the Factory Pattern.
+    Manages multiple logger instances based on unique names.
     """
-    global logger
-    logger = logging.getLogger(f"{bot_name}-logger")
-    log_level_num = getattr(logging, level.upper(), logging.INFO)
-    logger.setLevel(log_level_num)
 
-    log_file_path = f"logs/{bot_name}_{bot_version}.log"
-    handler = RotatingFileHandler(log_file_path, maxBytes=10 * 1024 * 1024, backupCount=50, encoding='utf-8')
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.propagate = False
-    os.makedirs(os.path.dirname(log_file_path), exist_ok=True)  # Ensure log directory exists
+    # Class-level dictionary to store logger instances
+    _loggers: Dict[str, 'Logger'] = {}
 
-    log_info(f"Logger initialized for {bot_name} version {bot_version} at level {level}")
+    def __init__(self, bot_name: str):
+        """
+        Initializes a Logger instance.
 
+        Parameters:
+        - name: Unique name for the logger.
+        - log_file_path: File path for the log file.
+        - level: Logging level as a string (e.g., 'DEBUG', 'INFO').
+        """
+        self.name = bot_name
+        self.log_file_path = f"logs/{self.name}.log"
+        self.level = ConfigReader.get_config(self.name).get_bot_logging_level().upper()
+        self.logger = logging.getLogger(self.name)
+        self._configure_logger()
 
-def _log(level: str, msg: str, exc_info: bool = False):
-    """
-    Internal helper to log messages with file, function, and line details.
+    def _configure_logger(self):
+        """Configures the logger with a rotating file handler and formatter."""
+        if not self.logger.handlers:
+            # Set logging level
+            log_level_num = getattr(logging, self.level, logging.INFO)
+            self.logger.setLevel(log_level_num)
 
-    Parameters:
-    - level: Logging level as a string (e.g., 'debug', 'info').
-    - msg: The log message.
-    - exc_info: If True, includes exception info in the log.
-    """
-    frame = inspect.stack()[2]
-    relative_path = os.path.relpath(frame.filename)
-    func_name = frame.function
-    line_no = frame.lineno
+            # Ensure the log directory exists
+            log_directory = os.path.dirname(self.log_file_path)
+            if log_directory:
+                os.makedirs(log_directory, exist_ok=True)
 
-    log_message = f"{relative_path}:{line_no} - {func_name} - {msg}"
-    getattr(logger, level)(log_message, exc_info=exc_info)
+            # Create RotatingFileHandler
+            handler = RotatingFileHandler(
+                self.log_file_path,
+                maxBytes=10 * 1024 * 1024,  # 10 MB
+                backupCount=50,
+                encoding='utf-8'
+            )
 
+            # Define log message format
+            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
 
-def log_debug(msg: str):
-    """Logs a message at DEBUG level."""
-    _log('debug', msg)
+            # Add handler to the logger
+            self.logger.addHandler(handler)
+            self.logger.propagate = False  # Prevent log messages from being propagated to the root logger
 
+    @classmethod
+    def get_logger(cls, name: str) -> 'Logger':
+        """
+        Factory method to get a Logger instance.
 
-def log_info(msg: str):
-    """Logs a message at INFO level."""
-    _log('info', msg)
+        Parameters:
+        - name: Unique name for the logger.
+        - log_file_path: File path for the log file.
+        - level: Logging level as a string (default is 'INFO').
 
+        Returns:
+        - Logger instance associated with the given name.
+        """
+        logger_key = name.lower()
 
-def log_warning(msg: str):
-    """Logs a message at WARNING level."""
-    _log('warning', msg)
+        if logger_key not in cls._loggers:
+            cls._loggers[logger_key] = cls(name)
 
+        return cls._loggers[logger_key]
 
-def log_error(msg: str):
-    """Logs a message at ERROR level with exception info if available."""
-    _log('error', msg, exc_info=True)
+    def _log(self, level: str, msg: str, exc_info: bool = False):
+        """
+        Internal helper to log messages with contextual information.
 
+        Parameters:
+        - level: Logging level as a string (e.g., 'debug', 'info').
+        - msg: The log message.
+        - exc_info: If True, includes exception information in the log.
+        """
+        # Retrieve the caller's frame information
+        frame = inspect.stack()[2]
+        relative_path = os.path.relpath(frame.filename)
+        func_name = frame.function
+        line_no = frame.lineno
 
-def log_critical(msg: str):
-    """Logs a message at CRITICAL level."""
-    _log('critical', msg)
+        # Format the log message
+        log_message = f"{relative_path}:{line_no} - {func_name} - {msg}"
+
+        # Get the logging method based on the level
+        log_method = getattr(self.logger, level.lower(), self.logger.info)
+
+        # Log the message
+        log_method(log_message, exc_info=exc_info)
+
+    def debug(self, msg: str):
+        """Logs a message at DEBUG level."""
+        self._log('debug', msg)
+
+    def info(self, msg: str):
+        """Logs a message at INFO level."""
+        self._log('info', msg)
+
+    def warning(self, msg: str):
+        """Logs a message at WARNING level."""
+        self._log('warning', msg)
+
+    def error(self, msg: str):
+        """Logs a message at ERROR level with exception information if available."""
+        self._log('error', msg, exc_info=True)
+
+    def critical(self, msg: str):
+        """Logs a message at CRITICAL level."""
+        self._log('critical', msg, exc_info=True)

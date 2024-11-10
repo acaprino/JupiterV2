@@ -6,7 +6,7 @@ from typing import Callable, Awaitable, List, Optional
 from brokers.broker_interface import BrokerAPI
 from utils.async_executor import execute_broker_call
 from utils.error_handler import exception_handler
-from utils.logger import log_info, log_error, log_debug
+from utils.logger import Logger
 
 
 class MarketStateNotifier:
@@ -14,7 +14,9 @@ class MarketStateNotifier:
     Monitors and notifies registered callbacks of changes in the market's open/closed state for a specific symbol.
     """
 
-    def __init__(self, broker: BrokerAPI, symbol: str, execution_lock: asyncio.Lock = None):
+    def __init__(self, bot_name: str, broker: BrokerAPI, symbol: str, execution_lock: asyncio.Lock = None):
+        self.bot_name = bot_name
+        self.logger = Logger.get_logger(bot_name)
         self.broker = broker
         self.symbol = symbol
         self.execution_lock = execution_lock
@@ -32,7 +34,7 @@ class MarketStateNotifier:
         if not self._running:
             self._running = True
             self._task = asyncio.create_task(self._run())
-            log_info(f"MarketStateNotifier started for symbol: {self.symbol}")
+            self.logger.info(f"MarketStateNotifier started for symbol: {self.symbol}")
 
     async def stop(self):
         """Stops the market state monitoring loop."""
@@ -44,7 +46,7 @@ class MarketStateNotifier:
                     await self._task
                 except asyncio.CancelledError:
                     pass
-            log_info(f"MarketStateNotifier stopped for symbol: {self.symbol}")
+            self.logger.info(f"MarketStateNotifier stopped for symbol: {self.symbol}")
 
     def register_on_market_status_change(
             self,
@@ -54,7 +56,7 @@ class MarketStateNotifier:
         if not callable(callback):
             raise ValueError("Callback must be callable")
         self._on_market_status_change_callbacks.append(callback)
-        log_info("Callback registered for market status changes.")
+        self.logger.info("Callback registered for market status changes.")
 
     async def _update_market_state(self, market_is_open: bool, initializing: bool = False):
         """Updates the current market state and notifies registered callbacks."""
@@ -77,7 +79,7 @@ class MarketStateNotifier:
         ]
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        log_info(f"Market state updated to {'open' if market_is_open else 'closed'} for {self.symbol}.")
+        self.logger.info(f"Market state updated to {'open' if market_is_open else 'closed'} for {self.symbol}.")
 
     @exception_handler
     async def _run(self):
@@ -85,7 +87,7 @@ class MarketStateNotifier:
         while self._running:
             try:
                 # Call broker to check if the market is open
-                market_is_open = await execute_broker_call(self.broker.is_market_open, self.symbol)
+                market_is_open = await execute_broker_call(self.bot_name, self.broker.is_market_open, self.symbol)
 
                 # Initial state check or state change detection
                 if not self._initialized:
@@ -98,8 +100,8 @@ class MarketStateNotifier:
                 now = datetime.now()
                 seconds_until_next_interval = (self.check_interval_minutes - now.minute % self.check_interval_minutes) * 60 - now.second
 
-                log_debug(f"Market is {'open' if market_is_open else 'closed'} for {self.symbol}. Next check in {seconds_until_next_interval} seconds.")
+                self.logger.debug(f"Market is {'open' if market_is_open else 'closed'} for {self.symbol}. Next check in {seconds_until_next_interval} seconds.")
                 await asyncio.sleep(seconds_until_next_interval)
             except Exception as e:
-                log_error(f"Error in MarketStateNotifier._run: {e}")
+                self.logger.error(f"Error in MarketStateNotifier._run: {e}")
                 await asyncio.sleep(5)  # Sleep before retrying after an error

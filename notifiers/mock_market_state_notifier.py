@@ -6,7 +6,7 @@ from typing import Callable, Awaitable, List, Optional
 
 from brokers.broker_interface import BrokerAPI
 from utils.error_handler import exception_handler
-from utils.logger import log_info, log_error, log_debug
+from utils.logger import Logger
 
 
 class MockMarketStateNotifier:
@@ -14,7 +14,9 @@ class MockMarketStateNotifier:
     Monitors and notifies registered callbacks of changes in the market's open/closed state for a specific symbol.
     """
 
-    def __init__(self, broker: BrokerAPI, symbol: str, execution_lock: asyncio.Lock = None):
+    def __init__(self, bot_name: str, broker: BrokerAPI, symbol: str, execution_lock: asyncio.Lock = None):
+        self.bot_name = bot_name
+        self.logger = Logger.get_logger(bot_name)
         self.broker = broker
         self.symbol = symbol
         self.execution_lock = execution_lock
@@ -32,7 +34,7 @@ class MockMarketStateNotifier:
         if not self._running:
             self._running = True
             self._task = asyncio.create_task(self._run())
-            log_info(f"MarketStateNotifier started for symbol: {self.symbol}")
+            self.logger.info(f"MarketStateNotifier started for symbol: {self.symbol}")
 
     async def stop(self):
         """Stops the market state monitoring loop."""
@@ -44,7 +46,7 @@ class MockMarketStateNotifier:
                     await self._task
                 except asyncio.CancelledError:
                     pass
-            log_info(f"MarketStateNotifier stopped for symbol: {self.symbol}")
+            self.logger.info(f"MarketStateNotifier stopped for symbol: {self.symbol}")
 
     def register_on_market_status_change(
             self,
@@ -54,7 +56,7 @@ class MockMarketStateNotifier:
         if not callable(callback):
             raise ValueError("Callback must be callable")
         self._on_market_status_change_callbacks.append(callback)
-        log_info("Callback registered for market status changes.")
+        self.logger.info("Callback registered for market status changes.")
 
     async def _update_market_state(self, market_is_open: bool, initializing: bool = False):
         """Updates the current market state and notifies registered callbacks."""
@@ -89,7 +91,7 @@ class MockMarketStateNotifier:
                 market_is_open = not self._market_open if random.random() < 0.5 else self._market_open
 
                 if _market_open_old != market_is_open:
-                    log_debug(f"Market state changed to {'open' if market_is_open else 'closed'}.")
+                    self.logger.debug(f"Market state changed to {'open' if market_is_open else 'closed'}.")
 
                 # Initial state check or state change detection
                 if not self._initialized:
@@ -104,5 +106,5 @@ class MockMarketStateNotifier:
 
                 await asyncio.sleep(seconds_until_next_interval)
             except Exception as e:
-                log_error(f"Error in MarketStateNotifier._run: {e}")
+                self.logger.error(f"Error in MarketStateNotifier._run: {e}")
                 await asyncio.sleep(5)  # Sleep before retrying after an error

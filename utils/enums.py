@@ -1,11 +1,6 @@
 from enum import Enum, auto
 
 
-class BotMode(Enum):
-    BACKTESTING = auto()
-    LIVE = auto()
-
-
 class OpType(Enum):
     BUY = "Buy"
     SELL = "Sell"

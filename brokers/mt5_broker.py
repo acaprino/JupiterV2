@@ -15,7 +15,7 @@ from datao.SymbolPrice import SymbolPrice
 from datao.TradeOrder import TradeOrder
 from utils.config import ConfigReader
 from utils.enums import Timeframe, FillingType, OpType, DealType, OrderSource, PositionType
-from utils.logger import log_warning, log_error, log_info, log_debug
+from utils.logger import Logger
 from utils.utils_functions import now_utc, dt_to_unix, unix_to_datetime
 
 # https://www.mql5.com/en/docs/constants/tradingconstants/dealproperties
@@ -52,21 +52,25 @@ REASON_MAPPING = {
 
 class MT5Broker(BrokerAPI):
 
-    def __init__(self, config: ConfigReader):
+    def __init__(self, bot_name: str):
+        self.bot_name = bot_name
+        self.logger = Logger.get_logger(bot_name)
+
         if not mt5.initialize():
-            log_error(f"initialization failed, error code {mt5.last_error()}")
+            self.logger.error(f"initialization failed, error code {mt5.last_error()}")
             mt5.shutdown()
             raise Exception("Failed to initialize MT5")
-        log_info("MT5 initialized successfully")
+        self.logger.info("MT5 initialized successfully")
 
         # Set up connection with MT5 account
+        config = ConfigReader.get_config(self.bot_name)
         account = config.get_mt5_account()
-        log_info(f"Trying to connect with account {account} and provided server credentials.")
+        self.logger.info(f"Trying to connect with account {account} and provided server credentials.")
         if not mt5.login(account, password=config.get_mt5_password(), server=config.get_mt5_server()):
-            log_error(f"Failed to connect to account #{account}, error code: {mt5.last_error()}")
+            self.logger.error(f"Failed to connect to account #{account}, error code: {mt5.last_error()}")
             raise Exception("Failed to initialize MT5")
-        log_info("Login success")
-        log_info(mt5.account_info())
+        self.logger.info("Login success")
+        self.logger.info(mt5.account_info())
 
         self._callbacks_lock = threading.Lock()
         self._running = True
@@ -103,18 +107,18 @@ class MT5Broker(BrokerAPI):
     def is_market_open(self, symbol: str) -> bool:
         symbol_info = mt5.symbol_info(symbol)
         if symbol_info is None:
-            log_warning(f"{symbol} not found, cannot retrieve symbol info.")
+            self.logger.warning(f"{symbol} not found, cannot retrieve symbol info.")
             return False
         return not symbol_info.trade_mode == mt5.SYMBOL_TRADE_MODE_DISABLED
 
     def get_broker_timezone_offset(self, symbol) -> Optional[int]:
         symbol_info = mt5.symbol_info(symbol)
         if symbol_info is None:
-            log_warning(f"{symbol} not found, cannot retrieve symbol info.")
+            self.logger.warning(f"{symbol} not found, cannot retrieve symbol info.")
             return None
 
         if symbol_info.trade_mode == mt5.SYMBOL_TRADE_MODE_DISABLED:
-            log_warning(f"Market closed for {symbol}. Cannot get the broker server timezone offset.")
+            self.logger.warning(f"Market closed for {symbol}. Cannot get the broker server timezone offset.")
             return None
 
         # Get the current broker time and UTC time to calculate offset
@@ -123,19 +127,19 @@ class MT5Broker(BrokerAPI):
         time_diff_seconds = abs(broker_time - utc_unix_timestamp)
         offset_hours = math.ceil(time_diff_seconds / 3600)
 
-        log_debug(f"Broker timestamp: {broker_time}, UTC timestamp: {utc_unix_timestamp}, Offset: {offset_hours} hours")
+        self.logger.debug(f"Broker timestamp: {broker_time}, UTC timestamp: {utc_unix_timestamp}, Offset: {offset_hours} hours")
         return offset_hours
 
     def get_market_info(self, symbol: str) -> Optional[SymbolInfo]:
         symbol_info = mt5.symbol_info(symbol)
         if symbol_info is None:
-            log_error(f"{symbol} not found, cannot place order.")
+            self.logger.error(f"{symbol} not found, cannot place order.")
             return None
 
         if not symbol_info.visible:
-            log_error(f"{symbol} is not visible. Attempting to enable.")
+            self.logger.error(f"{symbol} is not visible. Attempting to enable.")
             if not mt5.symbol_select(symbol, True):
-                log_error("symbol_select() failed, cannot place order.")
+                self.logger.error("symbol_select() failed, cannot place order.")
                 return None
 
         return SymbolInfo(
@@ -152,7 +156,7 @@ class MT5Broker(BrokerAPI):
     def get_symbol_price(self, symbol: str) -> Optional[SymbolPrice]:
         symbol_info_tick = mt5.symbol_info_tick(symbol)
         if symbol_info_tick is None:
-            log_error(f"{symbol} not found.")
+            self.logger.error(f"{symbol} not found.")
             return None
 
         return SymbolPrice(symbol_info_tick.ask, symbol_info_tick.bid)
@@ -174,7 +178,7 @@ class MT5Broker(BrokerAPI):
 
         # Convert from broker timezone to UTC
         timezone_offset = self.get_broker_timezone_offset(symbol)
-        log_debug(f"Timezone offset: {timezone_offset} hours")
+        self.logger.debug(f"Timezone offset: {timezone_offset} hours")
         df['time_open'] -= pd.to_timedelta(timezone_offset, unit='h')
         df['time_close'] -= pd.to_timedelta(timezone_offset, unit='h')
 
@@ -184,9 +188,9 @@ class MT5Broker(BrokerAPI):
 
         # Check and exclude the last candle if it's still open
         current_time = now_utc()
-        log_debug(f"Current UTC time: {current_time.strftime('%d/%m/%Y %H:%M:%S')}")
+        self.logger.debug(f"Current UTC time: {current_time.strftime('%d/%m/%Y %H:%M:%S')}")
         if current_time < df.iloc[-1]['time_close']:
-            log_debug(f"Excluding last open candle with close time: {df.iloc[-1]['time_close'].strftime('%d/%m/%Y %H:%M:%S')}")
+            self.logger.debug(f"Excluding last open candle with close time: {df.iloc[-1]['time_close'].strftime('%d/%m/%Y %H:%M:%S')}")
             df = df.iloc[:-1]
 
         # Ensure DataFrame has exactly 'count' rows
@@ -194,7 +198,7 @@ class MT5Broker(BrokerAPI):
 
     def shutdown(self):
         mt5.shutdown()
-        log_info("MT5 shutdown successfully")
+        self.logger.info("MT5 shutdown successfully")
 
     def get_working_directory(self):
         return mt5.terminal_info().data_path + "\\MQL5\\Files"
@@ -205,7 +209,7 @@ class MT5Broker(BrokerAPI):
         if account_info is None:
             raise Exception("Failed to retrieve account information")
 
-        log_info(f"Account balance: {account_info.balance}")
+        self.logger.info(f"Account balance: {account_info.balance}")
         return account_info.balance
 
     def get_account_leverage(self) -> float:
@@ -213,7 +217,7 @@ class MT5Broker(BrokerAPI):
         if account_info is None:
             raise Exception("Failed to retrieve account information")
 
-        log_info(f"Account leverage: {account_info.leverage}")
+        self.logger.info(f"Account leverage: {account_info.leverage}")
         return account_info.leverage
 
     # Order Placement Methods
@@ -227,7 +231,7 @@ class MT5Broker(BrokerAPI):
             raise Exception(f"Market is closed for symbol {request.symbol}, cannot place order.")
 
         filling_mode = request.filling_mode or self.find_filling_mode(request.symbol)
-        log_debug(f"Filling mode for {request.symbol}: {filling_mode}")
+        self.logger.debug(f"Filling mode for {request.symbol}: {filling_mode}")
 
         op_type = self.order_type_to_mt5(request.order_type)
 
@@ -245,13 +249,13 @@ class MT5Broker(BrokerAPI):
             "type_filling": self.filling_type_to_mt5(filling_mode),
         }
 
-        log_debug(f"Send_order_request payload: {mt5_request}")
+        self.logger.debug(f"Send_order_request payload: {mt5_request}")
 
         result = mt5.order_send(mt5_request)
         response = RequestResult(request, result)
 
         if not response.success:
-            log_error(f"Order failed, retcode={response.server_response_code}, description={response.comment}")
+            self.logger.error(f"Order failed, retcode={response.server_response_code}, description={response.comment}")
             raise Exception(f"Order send failed with retcode {response.server_response_code}")
 
         return response
@@ -275,9 +279,9 @@ class MT5Broker(BrokerAPI):
         result = mt5.order_send(close_request)
         req_result = RequestResult(close_request, result)
         if req_result.success:
-            log_info(f"Position {position.ticket} successfully closed.")
+            self.logger.info(f"Position {position.ticket} successfully closed.")
         else:
-            log_error(f"Error closing position {position.ticket}, error code = {result.retcode}, message = {result.comment}")
+            self.logger.error(f"Error closing position {position.ticket}, error code = {result.retcode}, message = {result.comment}")
 
         return req_result
 
@@ -368,7 +372,7 @@ class MT5Broker(BrokerAPI):
 
                 positions[deal.position_id].deals.append(self.map_deal(deal, timezone_offset))
             except Exception as e:
-                log_error(f"Error while processing deal with ticket {deal.ticket}: {e}")
+                self.logger.error(f"Error while processing deal with ticket {deal.ticket}: {e}")
             continue
 
         return positions

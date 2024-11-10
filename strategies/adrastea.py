@@ -22,8 +22,8 @@ from utils.config import ConfigReader
 from utils.enums import Indicators, Timeframe, TradingDirection, OpType, NotificationLevel, OrderSource
 from utils.error_handler import exception_handler
 from brokers.broker_interface import BrokerAPI
+from utils.logger import Logger
 
-from utils.logger import log_info, log_error, log_debug, log_warning
 from utils.mongo_db import MongoDB
 from utils.telegram_lib import TelegramBotWrapper
 from utils.utils_functions import describe_candle, now_utc, round_to_step, round_to_point, dt_to_unix, unix_to_datetime
@@ -70,6 +70,7 @@ class Adrastea(TradingStrategy):
     def __init__(self, broker: BrokerAPI, config: ConfigReader, execution_lock: asyncio.Lock):
         self.broker = broker
         self.config = config
+        self.logger = Logger.get_logger(config.get_bot_name())
         self.execution_lock = execution_lock
         # Internal state
         self.initialized = False
@@ -89,20 +90,20 @@ class Adrastea(TradingStrategy):
     @exception_handler
     async def initialize(self):
         async with self.execution_lock:
-            log_info("Initializing the strategy.")
+            self.logger.info("Initializing the strategy.")
 
-            market_is_open = await execute_broker_call(self.broker.is_market_open, self.config.get_symbol())
+            market_is_open = await execute_broker_call(self.config.get_bot_name(), self.broker.is_market_open, self.config.get_symbol())
             if not market_is_open:
-                log_info("Market is closed, waiting for it to open.")
+                self.logger.info("Market is closed, waiting for it to open.")
 
             await self.market_open_event.wait()
-            log_info("Market is open, proceeding with strategy bootstrap.")
+            self.logger.info("Market is open, proceeding with strategy bootstrap.")
 
             timeframe = self.config.get_timeframe()
             symbol = self.config.get_symbol()
             trading_direction = self.config.get_trading_direction()
 
-            log_debug(f"Config - Symbol: {symbol}, Timeframe: {timeframe}, Direction: {trading_direction}")
+            self.logger.debug(f"Config - Symbol: {symbol}, Timeframe: {timeframe}, Direction: {trading_direction}")
 
             bootstrap_rates_count = int(500 * (1 / timeframe.to_hours()))
             tot_candles_count = self.heikin_ashi_candles_buffer + bootstrap_rates_count + self.get_minimum_frames_count()
@@ -111,20 +112,21 @@ class Adrastea(TradingStrategy):
                 bootstrap_candles_logger = CandlesLogger(symbol, timeframe, trading_direction, custom_name='bootstrap')
 
                 candles = await execute_broker_call(
+                    self.config.get_bot_name(),
                     self.broker.get_last_candles,
                     self.config.get_symbol(),
                     self.config.get_timeframe(),
                     tot_candles_count
                 )
 
-                log_info("Calculating indicators on historical candles.")
+                self.logger.info("Calculating indicators on historical candles.")
                 await self.calculate_indicators(candles)
 
                 first_index = self.heikin_ashi_candles_buffer + self.get_minimum_frames_count() - 1
                 last_index = tot_candles_count - 1
 
                 for i in range(first_index, last_index):
-                    log_debug(f"Bootstrap frame {i + 1}, Candle data: {describe_candle(candles.iloc[i])}")
+                    self.logger.debug(f"Bootstrap frame {i + 1}, Candle data: {describe_candle(candles.iloc[i])}")
 
                     bootstrap_candles_logger.add_candle(candles.iloc[i])
                     self.should_enter, self.prev_state, self.cur_state, self.prev_condition_candle, self.cur_condition_candle = self.check_signals(
@@ -132,13 +134,13 @@ class Adrastea(TradingStrategy):
                         cur_condition_candle=self.cur_condition_candle
                     )
 
-                log_info(f"Bootstrap complete - Initial State: {self.cur_state}")
+                self.logger.info(f"Bootstrap complete - Initial State: {self.cur_state}")
 
                 self.send_message_with_details("🔄 Bootstrapping Complete - <b>Bot Ready for Trading</b>")
                 self.notify_state_change(candles, last_index)
                 self.initialized = True
             except Exception as e:
-                log_error(f"Error in strategy bootstrap: {e}")
+                self.logger.error(f"Error in strategy bootstrap: {e}")
                 self.initialized = False
 
     def get_minimum_frames_count(self):
@@ -169,7 +171,7 @@ class Adrastea(TradingStrategy):
         is_short = trading_direction == TradingDirection.SHORT
 
         def notify_event(event):
-            log_debug(event)
+            self.logger.debug(event)
             events_logger.add_event(
                 time_open=cur_candle['time_open'],
                 time_close=cur_candle['time_close'],
@@ -254,7 +256,7 @@ class Adrastea(TradingStrategy):
         async with self.execution_lock:
             symbol = self.config.get_symbol()
             time_ref = opening_time if is_open else closing_time
-            log_info(f"Market for {symbol} has {'opened' if is_open else 'closed'} at {unix_to_datetime(time_ref)}.")
+            self.logger.info(f"Market for {symbol} has {'opened' if is_open else 'closed'} at {unix_to_datetime(time_ref)}.")
             if is_open:
                 self.market_open_event.set()
                 if not initializing:
@@ -262,7 +264,7 @@ class Adrastea(TradingStrategy):
             else:
                 self.market_open_event.clear()
                 if not initializing:
-                    log_info("Allowing the last tick to be processed before fully closing the market.")
+                    self.logger.info("Allowing the last tick to be processed before fully closing the market.")
                     self.allow_last_tick = True
                     self.send_message_with_details(f"⏸️ Market for {symbol} has just <b>closed</b>. Pausing trading activities.")
 
@@ -270,18 +272,19 @@ class Adrastea(TradingStrategy):
     async def on_new_tick(self, timeframe: Timeframe, timestamp: datetime):
         async with self.execution_lock:
 
-            market_is_open = await execute_broker_call(self.broker.is_market_open, self.config.get_symbol())
+            market_is_open = await execute_broker_call(self.config.get_bot_name(), self.broker.is_market_open, self.config.get_symbol())
             if not market_is_open and not self.allow_last_tick:
-                log_info("Market is closed, skipping tick processing.")
+                self.logger.info("Market is closed, skipping tick processing.")
                 return
 
             if not self.initialized:
-                log_info("Strategy not initialized, skipping tick processing.")
+                self.logger.info("Strategy not initialized, skipping tick processing.")
                 return
 
             candles_count = self.heikin_ashi_candles_buffer + self.get_minimum_frames_count()
 
             candles = await execute_broker_call(
+                self.config.get_bot_name(),
                 self.broker.get_last_candles,
                 self.config.get_symbol(),
                 self.config.get_timeframe(),
@@ -290,9 +293,9 @@ class Adrastea(TradingStrategy):
             await self.calculate_indicators(candles)
 
             last_candle = candles.iloc[-1]
-            log_info(f"Candle: {describe_candle(last_candle)}")
+            self.logger.info(f"Candle: {describe_candle(last_candle)}")
 
-            log_debug("Checking for trading signals.")
+            self.logger.debug("Checking for trading signals.")
             self.should_enter, self.prev_state, self.cur_state, self.prev_condition_candle, self.cur_condition_candle = self.check_signals(
                 rates=candles, i=len(candles) - 1, trading_direction=self.config.get_trading_direction(),
                 state=self.cur_state, cur_condition_candle=self.cur_condition_candle
@@ -302,13 +305,13 @@ class Adrastea(TradingStrategy):
 
             if self.should_enter:
                 order_type_enter = OpType.BUY if self.config.get_trading_direction() == TradingDirection.LONG else OpType.SELL
-                log_info(f"Placing order of type {order_type_enter.label} due to trading signal.")
+                self.logger.info(f"Placing order of type {order_type_enter.label} due to trading signal.")
 
                 if self.check_signal_confirmation_and_place_order(self.prev_condition_candle):
                     order = await self.prepare_order_to_place(last_candle)
                     await self.place_order(order)
             else:
-                log_info(f"No condition satisfied for candle {describe_candle(last_candle)}")
+                self.logger.info(f"No condition satisfied for candle {describe_candle(last_candle)}")
 
             if self.allow_last_tick:
                 self.allow_last_tick = False
@@ -316,7 +319,7 @@ class Adrastea(TradingStrategy):
             try:
                 self.live_candles_logger.add_candle(last_candle)
             except Exception as e:
-                log_error(f"Error while logging candle: {e}")
+                self.logger.error(f"Error while logging candle: {e}")
 
     @exception_handler
     async def prepare_order_to_place(self, cur_candle: Series) -> TradeOrder | None:
@@ -327,12 +330,13 @@ class Adrastea(TradingStrategy):
         magic_number = self.config.get_bot_magic_number()
 
         symbol_info = await execute_broker_call(
+            self.config.get_bot_name(),
             self.broker.get_market_info,
             symbol
         )
 
         if symbol_info is None:
-            log_error("[place_order] Symbol info not found.")
+            self.logger.error("[place_order] Symbol info not found.")
             self.send_message_with_details("🚫 Symbol info not found for placing the order.")
             raise Exception(f"Symbol info {symbol} not found.")
 
@@ -344,15 +348,16 @@ class Adrastea(TradingStrategy):
         tp = self.get_take_profit(cur_candle, price, point, timeframe, trading_direction)
 
         account_balance = await execute_broker_call(
+            self.config.get_bot_name(),
             self.broker.get_account_balance
         )
 
         volume = self.get_volume(account_balance=account_balance, symbol_info=symbol_info, entry_price=price, stop_loss_price=sl)
 
-        log_info(f"[place_order] Account balance retrieved: {account_balance}, Calculated volume for the order on {symbol} at price {price}: {volume}")
+        self.logger.info(f"[place_order] Account balance retrieved: {account_balance}, Calculated volume for the order on {symbol} at price {price}: {volume}")
 
         if volume < volume_min:
-            log_warning(f"[place_order] Volume of {volume} is less than minimum of {volume_min}")
+            self.logger.warning(f"[place_order] Volume of {volume} is less than minimum of {volume_min}")
             self.send_message_with_details(f"❗ Volume of {volume} is less than the minimum of {volume_min} for {symbol}.")
             return None
 
@@ -440,31 +445,31 @@ class Adrastea(TradingStrategy):
 
     async def place_order(self, order: TradeOrder) -> bool:
 
-        log_info(f"[place_order] Placing order: {order}")
+        self.logger.info(f"[place_order] Placing order: {order}")
 
         response = self.broker.place_order(order)
 
-        log_debug(f"[place_order] Result of order placement: {response.success}")
+        self.logger.debug(f"[place_order] Result of order placement: {response.success}")
 
-        log_message = f"{response.server_response_code} - {response.server_response_message}"
+        self.logger.message = f"{response.server_response_code} - {response.server_response_message}"
 
         if response.success:
-            log_info(f"[place_order] Order successfully placed. Platform log: \"{log_message}\"")
+            self.logger.info(f"[place_order] Order successfully placed. Platform log: \"{self.logger.message}\"")
             self.send_message_with_details(
                 f"✅ <b>Order successfully placed with Deal ID {response.deal}:</b>\n\n"
                 f"{order}"
             )
         else:
-            log_error("[place_order] Error while placing the order.")
+            self.logger.error("[place_order] Error while placing the order.")
             self.send_message_with_details(f"🚫 <b>Error while placing the order:</b>\n\n"
                                            f"{order}\n"
-                                           f"Platform log: \"{log_message}\"")
+                                           f"Platform log: \"{self.logger.message}\"")
 
         return response.success
 
     def check_signal_confirmation_and_place_order(self, signal_candle):
-        bot_name = ConfigReader().get_bot_name()
-        magic = ConfigReader().get_bot_magic_number()
+        bot_name = self.config.get_bot_name()
+        magic = self.config.get_bot_magic_number()
         open_dt = signal_candle['time_open'].strftime('%H:%M')
         close_dt = signal_candle['time_close'].strftime('%H:%M')
 
@@ -479,7 +484,7 @@ class Adrastea(TradingStrategy):
         signal_confirmation = MongoDB().find_one("signals_confirmation", signal_id)
 
         if not signal_confirmation:
-            log_error(f"No confirmation found for signal with open time {open_dt} and close time {close_dt}")
+            self.logger.error(f"No confirmation found for signal with open time {open_dt} and close time {close_dt}")
             self.send_message_with_details(f"🚫 No confirmation found for signal with open time {open_dt} and close time {close_dt}. Not placing order by default.")
             return False
 
@@ -487,10 +492,10 @@ class Adrastea(TradingStrategy):
         user_username = signal_confirmation.get("user_name", "Unknown User")
 
         if confirmed:
-            log_info(f"Signal for candle {open_dt} - {close_dt} confirmed by {user_username}. Placing order.")
+            self.logger.info(f"Signal for candle {open_dt} - {close_dt} confirmed by {user_username}. Placing order.")
             self.send_message_with_details(f"✅ Signal for candle {open_dt} - {close_dt} confirmed by {user_username}. Placing order.")
         else:
-            log_info(f"Signal for candle {open_dt} - {close_dt} not confirmed by {user_username}. Not placing order.")
+            self.logger.info(f"Signal for candle {open_dt} - {close_dt} not confirmed by {user_username}. Not placing order.")
             self.send_message_with_details(f"🚫 Signal for candle {open_dt} - {close_dt} not confirmed by {user_username}. Not placing order.")
 
         return confirmed
@@ -498,14 +503,14 @@ class Adrastea(TradingStrategy):
     @exception_handler
     async def on_deal_closed(self, position: Position):
         async with self.execution_lock:
-            log_info(f"Deal closed: {position}")
+            self.logger.info(f"Deal closed: {position}")
 
             for deal in position.deals:
                 if deal.order_source not in [OrderSource.STOP_LOSS, OrderSource.TAKE_PROFIT]:
-                    log_info(f"Skipping deal with ticket {deal.ticket} as it is not a stop loss or take profit.")
+                    self.logger.info(f"Skipping deal with ticket {deal.ticket} as it is not a stop loss or take profit.")
                     continue
 
-            log_info(f"Deal closed:\n{deal}")
+            self.logger.info(f"Deal closed:\n{deal}")
 
             emoji = "🤑" if deal.profit > 0 else "😔"
 
@@ -528,7 +533,7 @@ class Adrastea(TradingStrategy):
     @exception_handler
     async def on_economic_event(self, event_info: dict):
         async with self.execution_lock:
-            log_info(f"Economic event occurred: {event_info}")
+            self.logger.info(f"Economic event occurred: {event_info}")
 
             event_name = event_info.get('event_name', 'Unknown Event')
             minutes_until_event = int(event_info.get('seconds_until_event', 1) / 60)
@@ -539,18 +544,20 @@ class Adrastea(TradingStrategy):
             )
 
             positions: List[Deal] = await execute_broker_call(
+                self.config.get_bot_name(),
                 self.broker.get_open_positions,
                 symbol=symbol
             )
 
             if not positions:
                 message = "ℹ️ No open positions found for forced closure due to the economic event."
-                log_warning(message)
+                self.logger.warning(message)
                 self.send_message_with_details(message)
             else:
                 for position in positions:
                     # Attempt to close the position
                     result: RequestResult = await execute_broker_call(
+                        self.config.get_bot_name(),
                         self.broker.close_position,
                         position=position, comment=f"'{event_name}'", magic_number=magic_number
                     )
@@ -564,7 +571,7 @@ class Adrastea(TradingStrategy):
                             f"❌ Failed to close position {position.ticket} due to the economic event: {event_name}.\n"
                             f"⚠️ Potential risks remain as the position could not be closed."
                         )
-                    log_info(message)
+                    self.logger.info(message)
                     self.send_message_with_details(message)
 
     async def calculate_indicators(self, rates):
@@ -587,6 +594,7 @@ class Adrastea(TradingStrategy):
 
         # Get the symbol's point precision (e.g., 0.01, 0.0001)
         symbol_info: SymbolInfo = await execute_broker_call(
+            self.config.get_bot_name(),
             self.broker.get_market_info,
             self.config.get_symbol()
         )
@@ -670,66 +678,66 @@ class Adrastea(TradingStrategy):
 
         # Condition 1
         can_check_1 = cur_state >= 0 and int_time_open(cur_candle) >= int_time_open(cur_condition_candle)
-        log_debug(f"Can check condition 1: {can_check_1}")
+        self.logger.debug(f"Can check condition 1: {can_check_1}")
         if can_check_1:
-            log_debug(f"Before evaluating condition 1: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
+            self.logger.debug(f"Before evaluating condition 1: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
             cond1 = (is_long and close >= supert_slow_prev) or (is_short and close < supert_slow_prev)
             if cond1:
                 if cur_state == 0:
                     prev_state, cur_state, prev_condition_candle, cur_condition_candle = self.update_state(cur_candle, prev_condition_candle, cur_condition_candle, 1, cur_state)
             elif cur_state >= 1:
                 prev_state, cur_state, prev_condition_candle, cur_condition_candle = self.update_state(cur_candle, prev_condition_candle, cur_condition_candle, 0, cur_state)
-            log_debug(f"After evaluating condition 1: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
+            self.logger.debug(f"After evaluating condition 1: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
 
         # Condition 2
         can_check_2 = cur_state >= 1 and int_time_open(cur_candle) > int_time_open(cur_condition_candle)
-        log_debug(f"Can check condition 2: {can_check_2}")
+        self.logger.debug(f"Can check condition 2: {can_check_2}")
         if can_check_2:
-            log_debug(f"Before evaluating condition 2: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
+            self.logger.debug(f"Before evaluating condition 2: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
             cond2 = (is_long and close <= supert_fast_cur) or (is_short and close > supert_fast_cur)
             if cond2 and cur_state == 1:
                 prev_state, cur_state, prev_condition_candle, cur_condition_candle = self.update_state(cur_candle, prev_condition_candle, cur_condition_candle, 2, cur_state)
-            log_debug(f"After evaluating condition 2: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
+            self.logger.debug(f"After evaluating condition 2: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
 
         # Condition 3
         can_check_3 = cur_state >= 2 and int_time_open(cur_candle) >= int_time_open(cur_condition_candle)
-        log_debug(f"Can check condition 3: {can_check_3}")
+        self.logger.debug(f"Can check condition 3: {can_check_3}")
         if can_check_3:
-            log_debug(f"Before evaluating condition 3: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
+            self.logger.debug(f"Before evaluating condition 3: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
             cond3 = (is_long and close >= supert_fast_prev) or (is_short and close < supert_fast_prev)
             if cond3:
                 if cur_state == 2:
                     prev_state, cur_state, prev_condition_candle, cur_condition_candle = self.update_state(cur_candle, prev_condition_candle, cur_condition_candle, 3, cur_state)
             elif cur_state >= 3:
                 prev_state, cur_state, prev_condition_candle, cur_condition_candle = self.update_state(cur_candle, prev_condition_candle, cur_condition_candle, 2, cur_state)
-            log_debug(f"After evaluating condition 3: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
+            self.logger.debug(f"After evaluating condition 3: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
 
         # Condition 4 (Stochastic)
         can_check_4 = cur_state >= 3
-        log_debug(f"Can check condition 4: {can_check_4}")
+        self.logger.debug(f"Can check condition 4: {can_check_4}")
         if can_check_4:
-            log_debug(f"Before evaluating condition 4: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
+            self.logger.debug(f"Before evaluating condition 4: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
             cond4 = (is_long and stoch_k_cur > stoch_d_cur and stoch_d_cur < 50) or (is_short and stoch_k_cur < stoch_d_cur and stoch_d_cur > 50)
             if cond4 and cur_state == 3:
                 prev_state, cur_state, prev_condition_candle, cur_condition_candle = self.update_state(cur_candle, prev_condition_candle, cur_condition_candle, 4, cur_state)
-            log_debug(f"After evaluating condition 4: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
+            self.logger.debug(f"After evaluating condition 4: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
 
         # Condition 5 (Final condition for entry)
         time_tolerance = 30
         can_check_5 = cur_state == 4 and int(cur_candle['time_open'].timestamp()) > int(cur_condition_candle['time_open'].timestamp())
-        log_debug(f"Can check condition 5: {can_check_5}")
+        self.logger.debug(f"Can check condition 5: {can_check_5}")
         if can_check_5:
             lower, upper = int_time_close(cur_condition_candle), int_time_close(cur_condition_candle) + time_tolerance
             cond5 = lower <= int_time_open(cur_candle) <= upper
-            log_debug(f"Lower Bound: {lower}, Upper Bound: {upper}, Current Candle Time: {int_time_open(cur_candle)}")
+            self.logger.debug(f"Lower Bound: {lower}, Upper Bound: {upper}, Current Candle Time: {int_time_open(cur_candle)}")
             # condition_5_met = to_int(cur_candle_time) >= lower_bound  # Uncomment for testing
             if cond5:
-                log_debug(f"Before evaluating condition 5: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
+                self.logger.debug(f"Before evaluating condition 5: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
                 prev_state, cur_state, prev_condition_candle, cur_condition_candle = self.update_state(cur_candle, prev_condition_candle, cur_condition_candle, 5, cur_state)
                 should_enter = True
-            log_debug(f"After evaluating condition 5: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
+            self.logger.debug(f"After evaluating condition 5: prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
 
-        log_debug(f"Returning: should_enter={should_enter}, prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
+        self.logger.debug(f"Returning: should_enter={should_enter}, prev_state={prev_state}, cur_state={cur_state}, cur_condition_candle={describe_candle(cur_condition_candle)}")
         return should_enter, prev_state, cur_state, prev_condition_candle, cur_condition_candle
 
     def update_state(
@@ -759,7 +767,7 @@ class Adrastea(TradingStrategy):
 
         ret_state = cur_state if cur_state != prev_state else prev_state
 
-        log_debug(f"Changing state from {prev_state} to {cur_state}")
+        self.logger.debug(f"Changing state from {prev_state} to {cur_state}")
 
         cur_time_unix = dt_to_unix(cur_candle['time_open'])
         cur_condition_time_unix = dt_to_unix(cur_condition_candle['time_open']) if cur_condition_candle is not None else None
@@ -772,15 +780,15 @@ class Adrastea(TradingStrategy):
 
         if cur_state != prev_state:
             if cur_state == 0:
-                log_debug("State changed to 0. Resetting cur_condition_candle.")
+                self.logger.debug("State changed to 0. Resetting cur_condition_candle.")
                 updated_candle = None
             else:
                 prev_time = cur_condition_candle['time_open'] if cur_condition_candle is not None else None
-                log_debug(f"Strategy candle time change from {prev_time} -> {cur_candle['time_open']}")
+                self.logger.debug(f"Strategy candle time change from {prev_time} -> {cur_candle['time_open']}")
                 updated_candle = cur_candle
             prev_condition_candle = cur_condition_candle
         else:
-            log_debug(
+            self.logger.debug(
                 f"update_state called but no state change detected. Current state remains {cur_state}. "
                 f"Called with candle time {cur_candle['time_open']}. Previous state was {prev_state}."
             )
@@ -789,17 +797,16 @@ class Adrastea(TradingStrategy):
         return prev_state, ret_state, prev_condition_candle, updated_candle
 
     def send_message(self, message, level=NotificationLevel.DEFAULT, reply_markup=None):
-        config = ConfigReader()
-        if not config.get_telegram_active():
+        if not self.config.get_telegram_active():
             return
 
         # Check if the notification level is high enough to send
-        send_notification = level.value >= config.get_telegram_notification_level().value
+        send_notification = level.value >= self.config.get_telegram_notification_level().value
         if not send_notification:
             return
 
-        t_token = config.get_telegram_token()
-        t_chat_ids = config.get_telegram_chat_ids()
+        t_token = self.config.get_telegram_token()
+        t_chat_ids = self.config.get_telegram_chat_ids()
         for chat_id in t_chat_ids:
             TelegramBotWrapper(t_token).send_message(chat_id, message, reply_markup=reply_markup)
 
@@ -822,18 +829,18 @@ class Adrastea(TradingStrategy):
     async def signal_confirmation_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         await query.answer()
-        log_debug(f"Callback query answered: {query}")
+        self.logger.debug(f"Callback query answered: {query}")
 
         # Retrieve data from callback, now in CSV format
         data = query.data.split(',')
-        log_debug(f"Data retrieved from callback: {data}")
+        self.logger.debug(f"Data retrieved from callback: {data}")
         bot_name, magic, open_dt, close_dt, confirmed_flag = data
         confirmed = confirmed_flag == '1'
         user_username = query.from_user.username if query.from_user.username else "Unknown User"
         user_id = query.from_user.id
         chat_id = update.effective_chat.id
         chat_username = update.effective_chat.username
-        log_debug(
+        self.logger.debug(
             f"Parsed data - bot_name: {bot_name}, magic: {magic}, open_dt: {open_dt}, close_dt: {close_dt}, confirmed: {confirmed}, user_username: {user_username}, user_id: {user_id}, chat_id: {chat_id}, chat_username: {chat_username}")
 
         # Convert open_dt and close_dt to datetime objects
@@ -842,20 +849,20 @@ class Adrastea(TradingStrategy):
         close_dt_datetime = unix_to_datetime(int(close_dt))
         now = now_utc()
         if now > close_dt_datetime + timedelta(seconds=self.config.get_timeframe().to_seconds()):
-            log_info(f"Signal from {open_dt_datetime} to {close_dt_datetime} is obsolete. Current time: {now}")
+            self.logger.info(f"Signal from {open_dt_datetime} to {close_dt_datetime} is obsolete. Current time: {now}")
             await query.edit_message_text("⚠️ This signal is obsolete and can no longer be confirmed or ignored.")
             return
 
         # Create CSV formatted confirmation and blocking data
         csv_confirm = f"{bot_name},{magic},{open_dt},{close_dt},1"
         csv_block = f"{bot_name},{magic},{open_dt},{close_dt},0"
-        log_debug(f"CSV formatted data - confirm: {csv_confirm}, block: {csv_block}")
+        self.logger.debug(f"CSV formatted data - confirm: {csv_confirm}, block: {csv_block}")
 
-        current_bot_name = ConfigReader().get_bot_name()
-        current_magic_number = ConfigReader().get_bot_magic_number()
-        log_debug(f"Current bot configuration - bot_name: {current_bot_name}, magic_number: {current_magic_number}")
+        current_bot_name = self.config.get_bot_name()
+        current_magic_number = self.config.get_bot_magic_number()
+        self.logger.debug(f"Current bot configuration - bot_name: {current_bot_name}, magic_number: {current_magic_number}")
         if bot_name != current_bot_name or int(magic) != current_magic_number:
-            log_info(f"Ignored update for bot_name '{bot_name}' and magic number '{magic}' as they do not match the current instance '{current_bot_name}' and magic number '{current_magic_number}'.")
+            self.logger.info(f"Ignored update for bot_name '{bot_name}' and magic number '{magic}' as they do not match the current instance '{current_bot_name}' and magic number '{current_magic_number}'.")
             return
 
         # Set the keyboard buttons with updated callback data
@@ -873,7 +880,7 @@ class Adrastea(TradingStrategy):
                     InlineKeyboardButton("Ignored ✔️", callback_data=csv_block)
                 ]
             ]
-        log_debug(f"Keyboard set with updated callback data: {keyboard}")
+        self.logger.debug(f"Keyboard set with updated callback data: {keyboard}")
 
         # Update the inline keyboard
         await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
@@ -891,12 +898,12 @@ class Adrastea(TradingStrategy):
             "chat_id": chat_id,
             "chat_username": chat_username
         }
-        log_debug(f"Database object to upsert: {obj}")
+        self.logger.debug(f"Database object to upsert: {obj}")
         MongoDB().upsert("signals_confirmation", {"bot_name": bot_name,
                                                   "magic_number": int(magic),
                                                   "open_time": open_dt,
                                                   "close_time": close_dt}, obj)
-        log_debug("Database updated with new signal confirmation")
+        self.logger.debug("Database updated with new signal confirmation")
 
         choice_text = "✅ Confirm" if confirmed else "🚫 Ignore"
 
@@ -905,19 +912,19 @@ class Adrastea(TradingStrategy):
 
         message = f"ℹ️ Your choice to <b>{choice_text}</b> the signal for the candle from {open_dt_formatted} to {close_dt_formatted} has been successfully saved."
         self.send_message(message)
-        log_debug(f"Confirmation message sent: {message}")
+        self.logger.debug(f"Confirmation message sent: {message}")
 
     def get_signal_confirmation_dialog(self, candle) -> InlineKeyboardMarkup:
-        log_debug("Starting signal confirmation dialog creation")
-        bot_name = ConfigReader().get_bot_name()
-        magic = ConfigReader().get_bot_magic_number()
+        self.logger.debug("Starting signal confirmation dialog creation")
+        bot_name = self.config.get_bot_name()
+        magic = self.config.get_bot_magic_number()
 
         open_dt = dt_to_unix(candle['time_open'])
         close_dt = dt_to_unix(candle['time_close'])
 
         csv_confirm = f"{bot_name},{magic},{open_dt},{close_dt},1"
         csv_block = f"{bot_name},{magic},{open_dt},{close_dt},0"
-        log_debug(f"CSV data - confirm: {csv_confirm}, block: {csv_block}")
+        self.logger.debug(f"CSV data - confirm: {csv_confirm}, block: {csv_block}")
 
         keyboard = [
             [
@@ -926,11 +933,11 @@ class Adrastea(TradingStrategy):
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        log_debug(f"Keyboard created: {keyboard}")
+        self.logger.debug(f"Keyboard created: {keyboard}")
 
         return reply_markup
 
     @exception_handler
     async def shutdown(self):
-        log_info("Shutting down the bot.")
+        self.logger.info("Shutting down the bot.")
         await self.telegram.stop()

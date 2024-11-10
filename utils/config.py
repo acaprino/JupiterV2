@@ -1,72 +1,131 @@
 import json
-from utils.enums import BotMode, TradingDirection, Timeframe, NotificationLevel
+import threading
+from typing import Dict, Any
+
+from utils.enums import TradingDirection, Timeframe, NotificationLevel
 from utils.utils_functions import string_to_enum
 
 
 class ConfigReader:
     """
-    Singleton class to read and provide configuration data from a JSON file.
-    Converts specific string values to corresponding Enum types for ease of use.
+    Classe ConfigReader che implementa il Pattern Factory.
+    Gestisce istanze di configurazione basate sul nome del bot estratto dal file di configurazione.
+    Converte valori stringa specifici in tipi Enum corrispondenti per una facile utilizzazione.
     """
-    metatrader5_config = None
-    live_config = None
-    bot_config = None
-    telegram_config = None
-    mongo_config = None
-    _instance = None  # Singleton instance
 
-    def __new__(cls, config_file_param: str = None):
-        """Implements singleton pattern to ensure only one instance is created."""
-        if cls._instance is None:
-            cls._instance = super(ConfigReader, cls).__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
+    # Dizionario di classe per memorizzare le istanze ConfigReader per ogni bot_name
+    _configs: Dict[str, 'ConfigReader'] = {}
+    _lock = threading.Lock()
 
-    def __init__(self, config_file_param: str = None):
-        if not self._initialized:
-            self.config = None
-            self._initialized = True
-            if config_file_param:
-                self.load_config(config_file_param)
+    def __init__(self, config_file_param: str):
+        """
+        Inizializza un'istanza di ConfigReader.
 
-    def load_config(self, filepath: str):
-        """Loads configuration from the specified JSON file."""
-        with open(filepath, 'r') as file:
-            self.config = json.load(file)
+        Parametri:
+        - config_file_param: Percorso al file di configurazione JSON.
+        """
+        self.config_file = config_file_param
+        self.config = None
+        self.metatrader5_config = None
+        self.live_config = None
+        self.bot_config = None
+        self.telegram_config = None
+        self.mongo_config = None
+
         self._initialize_config()
 
+    @classmethod
+    def load_config(cls, config_file_param: str) -> 'ConfigReader':
+        """
+        Metodo factory per creare e ottenere un'istanza di ConfigReader basata sul nome del bot.
+        Se l'istanza per il bot specificato esiste già, la restituisce.
+        Altrimenti, crea una nuova istanza, la memorizza e la restituisce.
+
+        Parametri:
+        - config_file_param: Percorso al file di configurazione JSON.
+
+        Ritorna:
+        - Istanza di ConfigReader associata al bot_name estratto dal file di configurazione.
+        """
+        # Tentativo di estrarre il bot_name dal file di configurazione
+        try:
+            with open(config_file_param, 'r') as f:
+                temp_config = json.load(f)
+            bot_name = temp_config.get('bot', {}).get('name')
+            if not bot_name:
+                raise ValueError(f"Il campo 'name' nella sezione 'bot' non è presente nel file {config_file_param}.")
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Il file di configurazione {config_file_param} non è stato trovato.")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Errore nel parsing del file JSON {config_file_param}: {e}")
+
+        bot_key = bot_name.lower()
+
+        with cls._lock:
+            if bot_key not in cls._configs:
+                cls._configs[bot_key] = cls(config_file_param)
+            return cls._configs[bot_key]
+
+    @classmethod
+    def get_config(cls, bot_name: str) -> 'ConfigReader':
+        """
+        Ottiene l'istanza di ConfigReader associata al bot_name.
+
+        Parametri:
+        - bot_name: Nome del bot per identificare la configurazione.
+
+        Ritorna:
+        - Istanza di ConfigReader associata al bot_name.
+
+        Solleva:
+        - KeyError se non esiste un'istanza per il bot_name.
+        """
+        bot_key = bot_name.lower()
+        if bot_key in cls._configs:
+            return cls._configs[bot_key]
+        else:
+            raise KeyError(f"Nessuna configurazione trovata per il bot '{bot_name}'.")
+
     def _initialize_config(self):
-        """Initializes various configuration sections and converts strings to Enums where needed."""
-        # Initialize MetaTrader5 config
+        """
+        Inizializza le varie sezioni di configurazione e converte le stringhe in Enum dove necessario.
+        """
+
+        with open(self.config_file, 'r') as f:
+            self.config = json.load(f)
+
+        if not self.config:
+            raise ValueError("Configurazione non caricata.")
+
+        # Inizializza la configurazione MetaTrader5
         self.metatrader5_config = self.config.get("mt5", {})
 
-        # Initialize Live config and convert certain fields to Enums
+        # Inizializza la configurazione Live e converte alcuni campi in Enum
         trading_config = self.config.get("trading", {})
         trading_config['timeframe'] = string_to_enum(Timeframe, trading_config.get('timeframe'))
         trading_config['trading_direction'] = string_to_enum(TradingDirection, trading_config.get('trading_direction'))
         trading_config['risk_percent'] = float(trading_config.get('risk_percent', 0.0))
         self.live_config = trading_config
 
-        # Initialize Bot config and convert mode to Enum
+        # Inizializza la configurazione Bot e converte il mode in Enum
         bot_config = self.config.get("bot", {})
-        bot_config['mode'] = string_to_enum(BotMode, bot_config.get('mode'))
         self.bot_config = bot_config
 
-        # Initialize Telegram config and convert notification level to Enum
+        # Inizializza la configurazione Telegram e converte il livello di notifica in Enum
         telegram_config = self.config.get("telegram", {})
         telegram_config['notification_level'] = string_to_enum(NotificationLevel, telegram_config.get('notification_level'))
         self.telegram_config = telegram_config
 
-        # Initialize MongoDB config
+        # Inizializza la configurazione MongoDB
         self.mongo_config = self.config.get("mongo", {})
 
-    # Getter methods for each configuration section
+    # Metodi getter per ciascuna sezione di configurazione
 
     def get_metatrader5_config(self):
         self._ensure_config_loaded()
         return self.metatrader5_config
 
-    def get_config(self):
+    def get_live_config(self):
         self._ensure_config_loaded()
         return self.live_config
 
@@ -82,7 +141,7 @@ class ConfigReader:
         self._ensure_config_loaded()
         return self.mongo_config
 
-    # Specific configuration getters for each section
+    # Metodi getter specifici per ogni sezione
 
     def get_mt5_timeout(self):
         return self.get_metatrader5_config().get("timeout")
@@ -100,16 +159,16 @@ class ConfigReader:
         return self.get_metatrader5_config().get("mt5_path")
 
     def get_symbol(self):
-        return self.get_config().get("symbol")
+        return self.get_live_config().get("symbol")
 
     def get_timeframe(self) -> Timeframe:
-        return self.get_config().get("timeframe")
+        return self.get_live_config().get("timeframe")
 
     def get_trading_direction(self) -> TradingDirection:
-        return self.get_config().get("trading_direction")
+        return self.get_live_config().get("trading_direction")
 
     def get_risk_percent(self) -> float:
-        return self.get_config().get("risk_percent")
+        return self.get_live_config().get("risk_percent")
 
     def get_bot_version(self):
         return self.get_bot_config().get("version")
@@ -147,7 +206,7 @@ class ConfigReader:
     def get_mongo_db_name(self) -> str:
         return self.get_mongo_config().get("db_name")
 
-    # Private helper to ensure configuration is loaded
+    # Metodo privato per assicurarsi che la configurazione sia caricata
     def _ensure_config_loaded(self):
         if self.config is None:
-            raise ValueError("Configuration not loaded. Call load_config(filepath) first.")
+            raise ValueError("Configurazione non caricata. Chiamare load_config(filepath) prima.")
