@@ -117,9 +117,6 @@ class ConfigReader:
     def get_bot_name(self):
         return self.get_bot_config().get("name")
 
-    def get_bot_mode(self) -> BotMode:
-        return self.get_bot_config().get("mode")
-
     def get_bot_magic_number(self):
         return self.get_bot_config().get("magic_number")
 

@@ -10,12 +10,12 @@
   "trading": {
     "symbol": "EURUSD",
     "timeframe": "M1",
-    "trading_direction": "LONG"
+    "trading_direction": "LONG",
+    "risk_percent": 0.01
   },
   "bot": {
     "version": 1.0,
-    "name": "EURUSD_LONG_M5",
-    "mode": "LIVE",
+    "name": "dev",
     "magic_number": 70943,
     "symbols_db_sheet_id": "1sVwbbDDXzx7JtP2LY3ghxL6StYNOlTK8nz0qMD7mEhY",
     "logging_level": "DEBUG"
