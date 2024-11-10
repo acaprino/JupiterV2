@@ -1,3 +1,3 @@
-# strategies/__init__.py
+# __init__.py
 
-# Questo file può rimanere vuoto oppure puoi aggiungere importazioni di strategie comuni
+# This file can remain empty or you can add common strategy imports

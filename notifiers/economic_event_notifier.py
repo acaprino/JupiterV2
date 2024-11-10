@@ -8,7 +8,7 @@ from typing import Callable, Awaitable, List, Dict, Optional
 from brokers.broker_interface import BrokerAPI
 from utils.async_executor import execute_broker_call
 from utils.error_handler import exception_handler
-from utils.logger import Logger
+from utils.bot_logger import BotLogger
 from utils.utils_functions import now_utc
 
 
@@ -20,7 +20,7 @@ class EconomicEventNotifier:
 
     def __init__(self, bot_name: str, broker: BrokerAPI, symbol: str, execution_lock: asyncio.Lock = None):
         self.bot_name = bot_name
-        self.logger = Logger.get_logger(bot_name)
+        self.logger = BotLogger.get_logger(bot_name)
         self.broker = broker
         self.symbol = symbol
         self.execution_lock = execution_lock
@@ -28,6 +28,9 @@ class EconomicEventNotifier:
         self.interval_seconds = 60 * 5
         self.importance = 3
         self.processed_events = {}  # Tracks already processed events
+
+        self.sandbox_dir = None
+        self.json_file_path = None
 
         self._running = False
         self._task = None

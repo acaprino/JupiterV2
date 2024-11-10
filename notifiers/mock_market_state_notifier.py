@@ -6,7 +6,7 @@ from typing import Callable, Awaitable, List, Optional
 
 from brokers.broker_interface import BrokerAPI
 from utils.error_handler import exception_handler
-from utils.logger import Logger
+from utils.bot_logger import BotLogger
 
 
 class MockMarketStateNotifier:
@@ -16,7 +16,7 @@ class MockMarketStateNotifier:
 
     def __init__(self, bot_name: str, broker: BrokerAPI, symbol: str, execution_lock: asyncio.Lock = None):
         self.bot_name = bot_name
-        self.logger = Logger.get_logger(bot_name)
+        self.logger = BotLogger.get_logger(bot_name)
         self.broker = broker
         self.symbol = symbol
         self.execution_lock = execution_lock

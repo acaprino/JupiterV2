@@ -7,14 +7,14 @@ from typing import Dict
 from utils.config import ConfigReader
 
 
-class Logger:
+class BotLogger:
     """
     A Logger class implementing the Factory Pattern.
     Manages multiple logger instances based on unique names.
     """
 
     # Class-level dictionary to store logger instances
-    _loggers: Dict[str, 'Logger'] = {}
+    _loggers: Dict[str, 'BotLogger'] = {}
 
     def __init__(self, bot_name: str):
         """
@@ -60,7 +60,7 @@ class Logger:
             self.logger.propagate = False  # Prevent log messages from being propagated to the root logger
 
     @classmethod
-    def get_logger(cls, name: str) -> 'Logger':
+    def get_logger(cls, name: str) -> 'BotLogger':
         """
         Factory method to get a Logger instance.
 

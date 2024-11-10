@@ -16,7 +16,7 @@ from brokers.mt5_broker import MT5Broker
 from utils.config import ConfigReader
 
 from utils.async_executor import executor
-from utils.logger import Logger
+from utils.bot_logger import BotLogger
 from utils.mongo_db import MongoDB
 
 TEST_MODE = False
@@ -29,7 +29,7 @@ async def main(config_file: str):
     config = ConfigReader.load_config(config_file_param=config_file)
     bot_name = config.get_bot_name()
 
-    logger = Logger.get_logger(bot_name)
+    logger = BotLogger.get_logger(bot_name)
     # Configure logging
     warnings.filterwarnings('ignore', category=FutureWarning)
 

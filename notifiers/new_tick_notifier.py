@@ -4,7 +4,7 @@ from typing import Callable, Awaitable, List
 
 from utils.enums import Timeframe
 from utils.error_handler import exception_handler
-from utils.logger import Logger
+from utils.bot_logger import BotLogger
 from utils.utils_functions import dt_to_unix, now_utc, unix_to_datetime
 
 
@@ -15,7 +15,7 @@ class TickNotifier:
 
     def __init__(self, bot_name: str, timeframe: Timeframe, execution_lock: asyncio.Lock = None):
         self.bot_name = bot_name
-        self.logger = Logger.get_logger(bot_name)
+        self.logger = BotLogger.get_logger(bot_name)
         self.timeframe = timeframe
         self.execution_lock = execution_lock
         self._running = False

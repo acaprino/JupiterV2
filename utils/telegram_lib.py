@@ -2,7 +2,7 @@ import asyncio
 import threading
 
 from telegram.constants import ParseMode
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler
+from telegram.ext import Application, CallbackQueryHandler
 
 
 class TelegramBotWrapper:

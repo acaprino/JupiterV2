@@ -6,7 +6,7 @@ from brokers.broker_interface import BrokerAPI
 from dto.Deal import Deal
 from utils.async_executor import execute_broker_call
 from utils.error_handler import exception_handler
-from utils.logger import Logger
+from utils.bot_logger import BotLogger
 from utils.utils_functions import now_utc
 
 
@@ -17,7 +17,7 @@ class ClosedPositionNotifier:
 
     def __init__(self, bot_name: str, broker: BrokerAPI, symbol: str, magic_number: int, execution_lock: asyncio.Lock = None):
         self.bot_name = bot_name
-        self.logger = Logger.get_logger(bot_name)
+        self.logger = BotLogger.get_logger(bot_name)
         self.broker = broker
         self.symbol = symbol
         self.magic_number = magic_number
@@ -25,6 +25,8 @@ class ClosedPositionNotifier:
         self.interval_seconds = 60 * 5
         self._running = False
         self._task = None
+        self.last_check_timestamp = None
+        self.started_with_closed_marked = None
         self._on_deal_status_change_event_callbacks: List[Callable[[Deal], Awaitable[None]]] = []
 
     async def start(self):

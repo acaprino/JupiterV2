@@ -1,7 +1,7 @@
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 
-from utils.logger import Logger
+from utils.bot_logger import BotLogger
 
 
 class MongoDB:
@@ -20,7 +20,7 @@ class MongoDB:
         # Avoid reinitialization
         if not self._initialized:
             # If host and port are not provided, use those from ConfigReader
-            self.logger = Logger.get_logger(bot_name)
+            self.logger = BotLogger.get_logger(bot_name)
             try:
                 self._client = MongoClient(f"mongodb://{host}:{port}/")
                 self._db_name = db_name

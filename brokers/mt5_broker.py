@@ -15,7 +15,7 @@ from dto.SymbolPrice import SymbolPrice
 from dto.TradeOrder import TradeOrder
 from utils.config import ConfigReader
 from utils.enums import Timeframe, FillingType, OpType, DealType, OrderSource, PositionType
-from utils.logger import Logger
+from utils.bot_logger import BotLogger
 from utils.utils_functions import now_utc, dt_to_unix, unix_to_datetime
 
 # https://www.mql5.com/en/docs/constants/tradingconstants/dealproperties
@@ -54,7 +54,7 @@ class MT5Broker(BrokerAPI):
 
     def __init__(self, bot_name: str):
         self.bot_name = bot_name
-        self.logger = Logger.get_logger(bot_name)
+        self.logger = BotLogger.get_logger(bot_name)
 
         if not mt5.initialize():
             self.logger.error(f"initialization failed, error code {mt5.last_error()}")

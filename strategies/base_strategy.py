@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Optional
 
 from dto.Position import Position
 from utils.enums import Timeframe

@@ -22,7 +22,7 @@ from utils.config import ConfigReader
 from utils.enums import Indicators, Timeframe, TradingDirection, OpType, NotificationLevel, OrderSource
 from utils.error_handler import exception_handler
 from brokers.broker_interface import BrokerAPI
-from utils.logger import Logger
+from utils.bot_logger import BotLogger
 
 from utils.mongo_db import MongoDB
 from utils.telegram_lib import TelegramBotWrapper
@@ -39,10 +39,10 @@ leverages = {
 }
 
 # Indicator parameters
-supertrend_fast_period = 10
-supertrend_fast_multiplier = 1
-supertrend_slow_period = 40
-supertrend_slow_multiplier = 3
+super_trend_fast_period = 10
+super_trend_fast_multiplier = 1
+super_trend_slow_period = 40
+super_trend_slow_multiplier = 3
 
 stoch_k_period = 24
 stoch_d_period = 5
@@ -51,13 +51,13 @@ stoch_smooth_k = 3
 # Series keys prefix
 STOCHASTIC_K = Indicators.STOCHASTIC_K.name
 STOCHASTIC_D = Indicators.STOCHASTIC_D.name
-SUPERTREND = Indicators.SUPERTREND.name
+SUPER_TREND = Indicators.SUPERTREND.name
 MOVING_AVERAGE = Indicators.MOVING_AVERAGE.name
 ATR = Indicators.ATR.name
 
 # Indicators series keys
-supertrend_fast_key = SUPERTREND + '_' + str(supertrend_fast_period) + '_' + str(supertrend_fast_multiplier)
-supertrend_slow_key = SUPERTREND + '_' + str(supertrend_slow_period) + '_' + str(supertrend_slow_multiplier)
+supertrend_fast_key = SUPER_TREND + '_' + str(super_trend_fast_period) + '_' + str(super_trend_fast_multiplier)
+supertrend_slow_key = SUPER_TREND + '_' + str(super_trend_slow_period) + '_' + str(super_trend_slow_multiplier)
 stoch_k_key = STOCHASTIC_K + '_' + str(stoch_k_period) + '_' + str(stoch_d_period) + '_' + str(stoch_smooth_k)
 stoch_d_key = STOCHASTIC_D + '_' + str(stoch_k_period) + '_' + str(stoch_d_period) + '_' + str(stoch_smooth_k)
 
@@ -70,7 +70,7 @@ class Adrastea(TradingStrategy):
     def __init__(self, broker: BrokerAPI, config: ConfigReader, execution_lock: asyncio.Lock):
         self.broker = broker
         self.config = config
-        self.logger = Logger.get_logger(config.get_bot_name())
+        self.logger = BotLogger.get_logger(config.get_bot_name())
         self.execution_lock = execution_lock
         # Internal state
         self.initialized = False
@@ -144,8 +144,8 @@ class Adrastea(TradingStrategy):
                 self.initialized = False
 
     def get_minimum_frames_count(self):
-        return max(supertrend_fast_period,
-                   supertrend_slow_period,
+        return max(super_trend_fast_period,
+                   super_trend_slow_period,
                    stoch_k_period,
                    stoch_d_period,
                    stoch_smooth_k) + 1
@@ -481,7 +481,7 @@ class Adrastea(TradingStrategy):
         }
 
         # Retrieve the signal confirmation from MongoDB
-        signal_confirmation = MongoDB().find_one("signals_confirmation", signal_id)
+        signal_confirmation = MongoDB(self.config.get_bot_name()).find_one("signals_confirmation", signal_id)
 
         if not signal_confirmation:
             self.logger.error(f"No confirmation found for signal with open time {open_dt} and close time {close_dt}")
@@ -542,6 +542,7 @@ class Adrastea(TradingStrategy):
             message = (
                 f"📰🔔 Economic event <b>{event_name}</b> is scheduled to occur in {minutes_until_event} minutes.\n"
             )
+            self.send_message_with_details(message)
 
             positions: List[Deal] = await execute_broker_call(
                 self.config.get_bot_name(),
@@ -576,18 +577,18 @@ class Adrastea(TradingStrategy):
 
     async def calculate_indicators(self, rates):
         # Convert candlestick to Heikin Ashi
-        await self.heikin_ashi_values(rates, self.config.get_symbol())
+        await self.heikin_ashi_values(rates)
 
         # Calculate indicators
-        supertrend(supertrend_fast_period, supertrend_fast_multiplier, rates)
-        supertrend(supertrend_slow_period, supertrend_slow_multiplier, rates)
+        supertrend(super_trend_fast_period, super_trend_fast_multiplier, rates)
+        supertrend(super_trend_slow_period, super_trend_slow_multiplier, rates)
         stochastic(stoch_k_period, stoch_d_period, stoch_smooth_k, rates)
         average_true_range(5, rates)
         average_true_range(2, rates)
 
         return rates
 
-    async def heikin_ashi_values(self, df, symbol):
+    async def heikin_ashi_values(self, df):
         # Ensure df is a DataFrame with the necessary columns
         if not isinstance(df, pd.DataFrame) or not {'open', 'high', 'low', 'close'}.issubset(df.columns):
             raise ValueError("Input must be a DataFrame with 'open', 'high', 'low', and 'close' columns.")
@@ -899,7 +900,7 @@ class Adrastea(TradingStrategy):
             "chat_username": chat_username
         }
         self.logger.debug(f"Database object to upsert: {obj}")
-        MongoDB().upsert("signals_confirmation", {"bot_name": bot_name,
+        MongoDB(self.config.get_bot_name()).upsert("signals_confirmation", {"bot_name": bot_name,
                                                   "magic_number": int(magic),
                                                   "open_time": open_dt,
                                                   "close_time": close_dt}, obj)

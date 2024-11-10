@@ -1,18 +1,14 @@
 import calendar
 import math
 import time
-from typing import Union
-
 import numpy as np
 import pandas as pd
 import pytz
 import os
 
+from typing import Union
 from datetime import timedelta, datetime, timezone
-
-from collections import deque
 from tzlocal import get_localzone
-
 from utils.enums import Timeframe
 
 
@@ -74,10 +70,6 @@ def get_end_datetime(backtesting_start, timeframe: Timeframe, candle_index):
     return end_datetime
 
 
-def clean_datetime(dt):
-    return dt.replace(microsecond=0)
-
-
 def string_to_enum(enum_class, value):
     try:
         enum_member = value.upper()
@@ -85,21 +77,6 @@ def string_to_enum(enum_class, value):
     except KeyError:
         valid_values = ", ".join([e.name for e in enum_class])
         raise ValueError(f"Invalid value '{value}' for {enum_class.__name__}. Valid values are: {valid_values}")
-
-
-class FixedSizeList:
-    def __init__(self, size):
-        self.size = size
-        self.data = deque(maxlen=size)
-
-    def add(self, item):
-        self.data.append(item)
-
-    def get_all(self):
-        return list(self.data)
-
-    def as_data_frame(self):
-        return pd.DataFrame(self.get_all())
 
 
 def utc_to_local(utc_dt):
@@ -120,7 +97,7 @@ def delete_file(file):
     try:
         os.remove(file)
         return True
-    except Exception as e:
+    except Exception:
         return False
 
 
@@ -150,7 +127,7 @@ def round_to_step(volume, volume_step):
 def create_directories(path):
     try:
         os.makedirs(path, exist_ok=True)
-    except Exception as e:
+    except Exception:
         pass
 
 
