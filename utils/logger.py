@@ -40,8 +40,8 @@ class Logger:
 
             # Ensure the log directory exists
             log_directory = os.path.dirname(self.log_file_path)
-            if log_directory:
-                os.makedirs(log_directory, exist_ok=True)
+            if log_directory and not os.path.exists(log_directory):
+                os.makedirs(log_directory, exist_ok=True)  # Create directory if it doesn't exist
 
             # Create RotatingFileHandler
             handler = RotatingFileHandler(
