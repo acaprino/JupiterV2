@@ -7,7 +7,7 @@
     "server": "FOREX.comGlobal-Demo 531",
     "mt5_path": "C:/Program Files/MetaTrader 5/terminal64.exe"
   },
-  "live": {
+  "trading": {
     "symbol": "EURUSD",
     "timeframe": "M1",
     "trading_direction": "LONG"
@@ -19,13 +19,6 @@
     "magic_number": 70943,
     "symbols_db_sheet_id": "1sVwbbDDXzx7JtP2LY3ghxL6StYNOlTK8nz0qMD7mEhY",
     "logging_level": "DEBUG"
-  },
-  "backtesting": {
-    "configs": [],
-    "gdrive": {
-      "sync_enabled": true,
-      "parent_folder_id": "1wCLi_uVh_wPCwxfbTK37rO-ZogzRZUyL"
-    }
   },
   "telegram": {
     "token": "7472156865:AAGwCB5MMlRNN4Bd59o_ZwpK1pHDFRFUVhc",

@@ -346,13 +346,10 @@ class Adrastea(TradingStrategy):
         account_balance = await execute_broker_call(
             self.broker.get_account_balance
         )
-        leverage = await execute_broker_call(
-            self.broker.get_account_leverage
-        )
 
-        volume = self.get_volume(account_balance, symbol_info, leverage, price)
+        volume = self.get_volume(account_balance=account_balance, symbol_info=symbol_info, entry_price=price, stop_loss_price=sl)
 
-        log_info(f"[place_order] Account balance retrieved: {account_balance}, Leverage obtained: {leverage}, Calculated volume for the order on {symbol} at price {price}: {volume}")
+        log_info(f"[place_order] Account balance retrieved: {account_balance}, Calculated volume for the order on {symbol} at price {price}: {volume}")
 
         if volume < volume_min:
             log_warning(f"[place_order] Volume of {volume} is less than minimum of {volume_min}")
@@ -428,27 +425,18 @@ class Adrastea(TradingStrategy):
         # Return the price rounded to the symbol's point value.
         return self.round_to_point(adjusted_price, symbol_point)
 
-    def get_volume(self, account_balance, symbol_info, leverage, entry_price):
-        """
-        Calculate the lot size based on a fixed percentage of the account balance, adjusted for leverage,
-        and ensuring compliance with the broker's lot size constraints.
-        """
-        # Calculate the capital to be invested in the trade
-        capital_to_invest = account_balance * 0.20 * leverage
-
-        # Calculate the lot size directly (volume in lotti)
-        lot_size = capital_to_invest / (entry_price * symbol_info.trade_contract_size)
-
-        # Adjust the lot size to meet the broker's minimum and maximum requirements
-        adjusted_lot_size = max(symbol_info.volume_min, min(symbol_info.volume_max, round_to_step(lot_size, symbol_info.volume_step)))
-
-        # Log warnings if necessary
-        if lot_size < symbol_info.volume_min:
-            log_warning(f"Adjusted lot size to {adjusted_lot_size} to meet minimum requirement of {symbol_info.volume_min} for {symbol_info.name}.")
-        if lot_size > symbol_info.volume_max:
-            log_warning(f"Adjusted lot size to {adjusted_lot_size} to meet maximum requirement of {symbol_info.volume_max} for {symbol_info.name}.")
-
-        return adjusted_lot_size
+    def get_volume(self, account_balance, symbol_info, entry_price, stop_loss_price):
+        risk_percent = 0.01  # Risk 1% of account balance per trade
+        risk_amount = account_balance * risk_percent
+        stop_loss_pips = abs(entry_price - stop_loss_price) / symbol_info.point
+        pip_value = symbol_info.trade_contract_size * symbol_info.point
+        volume = risk_amount / (stop_loss_pips * pip_value)
+        # Adjust volume to meet broker's constraints
+        adjusted_volume = max(
+            symbol_info.volume_min,
+            min(symbol_info.volume_max, round_to_step(volume, symbol_info.volume_step))
+        )
+        return adjusted_volume
 
     async def place_order(self, order: TradeOrder) -> bool:
 

@@ -41,10 +41,11 @@ class ConfigReader:
         self.metatrader5_config = self.config.get("mt5", {})
 
         # Initialize Live config and convert certain fields to Enums
-        live_config = self.config.get("live", {})
-        live_config['timeframe'] = string_to_enum(Timeframe, live_config.get('timeframe'))
-        live_config['trading_direction'] = string_to_enum(TradingDirection, live_config.get('trading_direction'))
-        self.live_config = live_config
+        trading_config = self.config.get("trading", {})
+        trading_config['timeframe'] = string_to_enum(Timeframe, trading_config.get('timeframe'))
+        trading_config['trading_direction'] = string_to_enum(TradingDirection, trading_config.get('trading_direction'))
+        trading_config['risk_percent'] = float(trading_config.get('risk_percent', 0.0))
+        self.live_config = trading_config
 
         # Initialize Bot config and convert mode to Enum
         bot_config = self.config.get("bot", {})
@@ -106,6 +107,9 @@ class ConfigReader:
 
     def get_trading_direction(self) -> TradingDirection:
         return self.get_config().get("trading_direction")
+
+    def get_risk_percent(self) -> float:
+        return self.get_config().get("risk_percent")
 
     def get_bot_version(self):
         return self.get_bot_config().get("version")
