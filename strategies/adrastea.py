@@ -432,6 +432,7 @@ class Adrastea(TradingStrategy):
 
     def get_volume(self, account_balance, symbol_info, entry_price, stop_loss_price):
         risk_percent = self.config.get_risk_percent()
+        self.logger.info(f"Calculating volume for account balance {account_balance}, symbol info {symbol_info}, entry price {entry_price}, stop loss price {stop_loss_price}, and risk percent {risk_percent}")
         risk_amount = account_balance * risk_percent
         stop_loss_pips = abs(entry_price - stop_loss_price) / symbol_info.point
         pip_value = symbol_info.trade_contract_size * symbol_info.point
