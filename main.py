@@ -9,7 +9,6 @@ from brokers.broker_interface import BrokerAPI
 from notifiers.closed_positions_notifier import ClosedPositionNotifier
 from notifiers.economic_event_notifier import EconomicEventNotifier
 from notifiers.market_state_notifier import MarketStateNotifier
-from notifiers.mock_market_state_notifier import MockMarketStateNotifier
 from notifiers.new_tick_notifier import TickNotifier
 from strategies.adrastea import Adrastea
 from brokers.mt5_broker import MT5Broker
@@ -18,8 +17,6 @@ from utils.config import ConfigReader
 from utils.async_executor import executor
 from utils.bot_logger import BotLogger
 from utils.mongo_db import MongoDB
-
-TEST_MODE = False
 
 
 async def main(config_file: str):
@@ -37,6 +34,7 @@ async def main(config_file: str):
 
     if not mongo_db.test_connection():
         logger.error("MongoDB connection failed. Exiting...")
+        print("MongoDB connection failed. Exiting...")
         return
 
     # Initialize the broker
@@ -48,11 +46,7 @@ async def main(config_file: str):
     # Initialize the MarketStateNotifier
     tick_notifier = TickNotifier(bot_name=bot_name, timeframe=config.get_timeframe(), execution_lock=execution_lock)
 
-    if TEST_MODE:
-        market_state_notifier = MockMarketStateNotifier(bot_name=bot_name, broker=broker, symbol=config.get_symbol(), execution_lock=execution_lock)
-    else:
-        market_state_notifier = MarketStateNotifier(bot_name=bot_name, broker=broker, symbol=config.get_symbol(), execution_lock=execution_lock)
-
+    market_state_notifier = MarketStateNotifier(bot_name=bot_name, broker=broker, symbol=config.get_symbol(), execution_lock=execution_lock)
     economic_event_notifier = EconomicEventNotifier(bot_name=bot_name, broker=broker, symbol=config.get_symbol(), execution_lock=execution_lock)
     closed_deals_notifier = ClosedPositionNotifier(bot_name=bot_name, broker=broker, symbol=config.get_symbol(), magic_number=config.get_bot_magic_number(), execution_lock=execution_lock)
 
@@ -66,8 +60,8 @@ async def main(config_file: str):
     closed_deals_notifier.register_on_deal_status_notifier(strategy.on_deal_closed)
 
     # Execute the strategy bootstrap method
-    if not TEST_MODE:
-        await asyncio.create_task(strategy.initialize())
+
+    asyncio.create_task(strategy.initialize())
     await market_state_notifier.start()
     await tick_notifier.start()
     await economic_event_notifier.start()
@@ -112,4 +106,5 @@ if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     loop.set_default_executor(executor)
     asyncio.set_event_loop(loop)
+
     loop.run_until_complete(main(config_file_param))

@@ -30,8 +30,12 @@ class TelegramBotWrapper:
         self.ready_event.wait()
 
     def _run_bot(self):
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
+
+        try:
+            self.loop = asyncio.get_event_loop()
+        except RuntimeError as e:  # No loop found
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
 
         self.application = Application.builder().token(self.token).build()
 
