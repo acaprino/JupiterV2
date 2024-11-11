@@ -84,6 +84,7 @@ class Adrastea(TradingStrategy):
         self.allow_last_tick = False
         self.telegram.start()
         self.market_open_event = asyncio.Event()
+        self.bootstrap_completed_event = asyncio.Event()
         self.telegram.add_command_callback_handler(self.signal_confirmation_handler)
         self.live_candles_logger = CandlesLogger(config.get_symbol(), config.get_timeframe(), config.get_trading_direction())
 
@@ -248,6 +249,8 @@ class Adrastea(TradingStrategy):
                 self.send_message_with_details("🔄 Bootstrapping Complete - <b>Bot Ready for Trading</b>")
                 self.notify_state_change(candles, last_index)
                 self.initialized = True
+
+                self.bootstrap_completed_event.set()
             except Exception as e:
                 self.logger.error(f"Error in strategy bootstrap: {e}")
                 self.initialized = False
@@ -275,6 +278,8 @@ class Adrastea(TradingStrategy):
 
     @exception_handler
     async def on_new_tick(self, timeframe: Timeframe, timestamp: datetime):
+        await self.bootstrap_completed_event.wait()
+
         async with self.execution_lock:
 
             market_is_open = await execute_broker_call(self.config.get_bot_name(), self.broker.is_market_open, self.config.get_symbol())
@@ -823,13 +828,13 @@ class Adrastea(TradingStrategy):
                                                           self.config.get_bot_name(),
                                                           self.config.get_timeframe(),
                                                           self.config.get_trading_direction())
-        direction_emoji = "⬆️" if trading_direction.name == "LONG" else "⬇️"
+        direction_emoji = "📈" if trading_direction.name == "LONG" else "📉️"
         detailed_message = (
             f"{message}\n\n"
             "<b>Details:</b>\n"
-            f"🤖 <b>Bot name:</b> {bot_name}\n"
+            f"💻 <b>Bot name:</b> {bot_name}\n"
             f"💱 <b>Symbol:</b> {symbol}\n"
-            f"🕒 <b>Timeframe:</b> {timeframe.name}\n"
+            f"📊 <b>Timeframe:</b> {timeframe.name}\n"
             f"{direction_emoji} <b>Direction:</b> {trading_direction.name}"
         )
         self.send_message(detailed_message, level, reply_markup)
