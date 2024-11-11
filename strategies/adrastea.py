@@ -831,7 +831,7 @@ class Adrastea(TradingStrategy):
         direction_emoji = "📈" if trading_direction.name == "LONG" else "📉️"
         detailed_message = (
             f"{message}\n\n"
-            "<b>Details:</b>\n"
+            "<b>Details:</b>\n\n"
             f"💻 <b>Bot name:</b> {bot_name}\n"
             f"💱 <b>Symbol:</b> {symbol}\n"
             f"📊 <b>Timeframe:</b> {timeframe.name}\n"
