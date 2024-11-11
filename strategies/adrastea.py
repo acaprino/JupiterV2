@@ -246,7 +246,7 @@ class Adrastea(TradingStrategy):
 
                 self.logger.info(f"Bootstrap complete - Initial State: {self.cur_state}")
 
-                self.send_message_with_details("🔄 Bootstrapping Complete - <b>Bot Ready for Trading</b>")
+                self.send_message_with_details("🔄 Bootstrapping Complete - <b>Bot Ready for trading</b>")
                 self.notify_state_change(candles, last_index)
                 self.initialized = True
 
