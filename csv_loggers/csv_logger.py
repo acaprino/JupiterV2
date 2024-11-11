@@ -35,11 +35,11 @@ class CSVLogger:
 
     def _initialize_logger(self, logger_name, output_path, max_bytes, backup_count):
         """Sets up the logging mechanism, directories, and file paths."""
-        create_directories(f"output/{output_path}")
+        self.full_output_path = f"output/{output_path}" if output_path else "output"
+        create_directories(self.full_output_path)
 
         # Define paths and file names
         self.relative_output_path = output_path
-        self.full_output_path = f"output/{output_path}" if output_path else "output"
         current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.file_name = f"{logger_name}_{current_time}.csv" if logger_name else None
         self.csv_file_path = os.path.join(self.full_output_path, self.file_name) if logger_name else None

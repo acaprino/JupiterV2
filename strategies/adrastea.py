@@ -260,14 +260,18 @@ class Adrastea(TradingStrategy):
             self.logger.info(f"Market for {symbol} has {'opened' if is_open else 'closed'} at {unix_to_datetime(time_ref)}.")
             if is_open:
                 self.market_open_event.set()
-                # if not initializing:
-                self.send_message_with_details(f"⏰ Market for {symbol} has just <b>opened</b>. Resuming trading activities.")
+                if initializing:
+                    self.send_message_with_details(f"🟢 Market for {symbol} is <b>open</b>.")
+                else:
+                    self.send_message_with_details(f"⏰🟢 Market for {symbol} has just <b>opened</b>. Resuming trading activities.")
             else:
                 self.market_open_event.clear()
-                # if not initializing:
-                self.logger.info("Allowing the last tick to be processed before fully closing the market.")
-                self.allow_last_tick = True
-                self.send_message_with_details(f"⏸️ Market for {symbol} has just <b>closed</b>. Pausing trading activities.")
+                if initializing:
+                    self.send_message_with_details(f"⏸️ Market for {symbol} is <b>closed</b>.")
+                else:
+                    self.logger.info("Allowing the last tick to be processed before fully closing the market.")
+                    self.allow_last_tick = True
+                    self.send_message_with_details(f"🌙⏸️ Market for {symbol} has just <b>closed</b>. Pausing trading activities.")
 
     @exception_handler
     async def on_new_tick(self, timeframe: Timeframe, timestamp: datetime):
