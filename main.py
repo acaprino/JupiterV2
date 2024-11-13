@@ -16,9 +16,10 @@ from utils.config import ConfigReader
 
 from utils.async_executor import executor
 from utils.bot_logger import BotLogger
+from utils.error_handler import exception_handler
 from utils.mongo_db import MongoDB
 
-
+@exception_handler
 async def main(config_file: str):
     """
     Main function that starts the asynchronous trading bot.

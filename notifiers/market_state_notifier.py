@@ -29,6 +29,7 @@ class MarketStateNotifier:
         self._market_opened_time: Optional[float] = None
         self._on_market_status_change_callbacks: List[Callable[[bool, Optional[float], Optional[float], Optional[bool]], Awaitable[None]]] = []
 
+    @exception_handler
     async def start(self):
         """Starts the market state monitoring loop."""
         if not self._running:
@@ -36,6 +37,7 @@ class MarketStateNotifier:
             self._task = asyncio.create_task(self._run())
             self.logger.info(f"MarketStateNotifier started for symbol: {self.symbol}")
 
+    @exception_handler
     async def stop(self):
         """Stops the market state monitoring loop."""
         if self._running:
@@ -58,6 +60,7 @@ class MarketStateNotifier:
         self._on_market_status_change_callbacks.append(callback)
         self.logger.info("Callback registered for market status changes.")
 
+    @exception_handler
     async def _update_market_state(self, market_is_open: bool, initializing: bool = False):
         """Updates the current market state and notifies registered callbacks."""
         current_time = time.time()

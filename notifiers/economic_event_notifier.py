@@ -36,6 +36,7 @@ class EconomicEventNotifier:
         self._task = None
         self._on_economic_event_callbacks: List[Callable[[Dict], Awaitable[None]]] = []
 
+    @exception_handler
     async def start(self):
         """Starts the notifier by initializing settings and launching the monitoring loop."""
         if not self._running:
@@ -115,6 +116,7 @@ class EconomicEventNotifier:
             except Exception as e:
                 self.logger.error(f"Error while monitoring events: {e}")
 
+    @exception_handler
     async def wait_next_run(self):
         # Wait until the next check interval
         now = now_utc()
@@ -131,6 +133,7 @@ class EconomicEventNotifier:
         if expired_events:
             self.logger.debug(f"Removed expired events: {expired_events}")
 
+    @exception_handler
     async def _load_events(self) -> List[Dict]:
         """Loads and parses economic events from JSON file after checking for file lock."""
         self.logger.debug(f"Loading events from JSON file at: {self.json_file_path}")
@@ -172,6 +175,7 @@ class EconomicEventNotifier:
             time.sleep(check_interval)
         self.logger.debug(f"Lock file {lock_file_path} removed or timeout reached.")
 
+    @exception_handler
     async def _handle_event(self, event: Dict):
         """Processes a single economic event and triggers callbacks."""
         event_id = event.get('event_id')
@@ -188,6 +192,7 @@ class EconomicEventNotifier:
 
         await self._notify_callbacks(event)
 
+    @exception_handler
     async def _notify_callbacks(self, notification: Dict):
         """Notifies registered callbacks of an economic event."""
         tasks = [callback(notification) for callback in self._on_economic_event_callbacks]
@@ -227,6 +232,7 @@ class EconomicEventNotifier:
         self.logger.error(f"Symbol '{symbol}' not found in pairs.json")
         return None
 
+    @exception_handler
     async def stop(self):
         """Stops the notifier by canceling the monitoring loop."""
         if self._running:

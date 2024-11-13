@@ -29,6 +29,7 @@ class ClosedPositionNotifier:
         self.started_with_closed_marked = None
         self._on_deal_status_change_event_callbacks: List[Callable[[Deal], Awaitable[None]]] = []
 
+    @exception_handler
     async def start(self):
         """Starts the closed position notifier loop, setting the initial timestamp for checking closed positions."""
         if not self._running:
@@ -107,6 +108,7 @@ class ClosedPositionNotifier:
                 exception = True
                 await asyncio.sleep(exception_retry_seconds)
 
+    @exception_handler
     async def stop(self):
         """Stops the closed position notifier by canceling the monitoring task."""
         if self._running:

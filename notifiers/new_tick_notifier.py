@@ -22,6 +22,7 @@ class TickNotifier:
         self._task = None
         self._on_new_tick_callbacks: List[Callable[[Timeframe, datetime], Awaitable[None]]] = []
 
+    @exception_handler
     async def start(self):
         """Starts the tick notifier loop."""
         if not self._running:
@@ -29,6 +30,7 @@ class TickNotifier:
             self._task = asyncio.create_task(self._run())
             self.logger.info(f"TickNotifier started for timeframe {self.timeframe}.")
 
+    @exception_handler
     async def stop(self):
         """Stops the tick notifier loop."""
         if self._running:
@@ -63,6 +65,7 @@ class TickNotifier:
             except Exception as e:
                 self.logger.error(f"Error in TickNotifier._run: {e}")
 
+    @exception_handler
     async def wait_next_tick(self) -> datetime:
         """Calculates the time to wait until the next tick and waits for it."""
         timeframe_duration = self.timeframe.to_seconds()
