@@ -4,6 +4,9 @@ import threading
 from telegram.constants import ParseMode
 from telegram.ext import Application, CallbackQueryHandler
 
+from utils.bot_logger import BotLogger
+from utils.error_handler import exception_handler
+
 
 class TelegramBotWrapper:
     _instance = None  # Class attribute to store the singleton instance
@@ -14,7 +17,7 @@ class TelegramBotWrapper:
             cls._instance = super(TelegramBotWrapper, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self, token):
+    def __init__(self, token, bot_name):
         if hasattr(self, '_initialized') and self._initialized:
             return  # Prevent reinitialization
         self.token = token
@@ -22,6 +25,7 @@ class TelegramBotWrapper:
         self.bot_thread = None
         self.loop = None
         self.ready_event = threading.Event()
+        self.logger = BotLogger.get_logger(bot_name)
         self._initialized = True  # Mark instance as initialized
 
     def start(self):
@@ -54,6 +58,7 @@ class TelegramBotWrapper:
                 self.loop
             )
 
+    @exception_handler
     async def _send_message(self, chat_id, text, reply_markup=None):
         await self.application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 

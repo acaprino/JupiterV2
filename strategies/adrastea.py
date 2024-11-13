@@ -80,7 +80,7 @@ class Adrastea(TradingStrategy):
         self.cur_state = None
         self.should_enter = False
         self.heikin_ashi_candles_buffer = int(1000 * config.get_timeframe().to_hours())
-        self.telegram = TelegramBotWrapper(config.get_telegram_token())
+        self.telegram = TelegramBotWrapper(token=config.get_telegram_token(), bot_name=config.get_bot_name())
         self.allow_last_tick = False
         self.telegram.start()
         self.market_open_event = asyncio.Event()
@@ -455,6 +455,7 @@ class Adrastea(TradingStrategy):
         )
         return adjusted_volume
 
+    @exception_handler
     async def place_order(self, order: TradeOrder) -> bool:
 
         self.logger.info(f"[place_order] Placing order: {order}")
@@ -587,6 +588,7 @@ class Adrastea(TradingStrategy):
                     self.logger.info(message)
                     self.send_message_with_details(message)
 
+    @exception_handler
     async def calculate_indicators(self, rates):
         # Convert candlestick to Heikin Ashi
         await self.heikin_ashi_values(rates)
@@ -600,6 +602,7 @@ class Adrastea(TradingStrategy):
 
         return rates
 
+    @exception_handler
     async def heikin_ashi_values(self, df):
         # Ensure df is a DataFrame with the necessary columns
         if not isinstance(df, pd.DataFrame) or not {'open', 'high', 'low', 'close'}.issubset(df.columns):
@@ -818,10 +821,9 @@ class Adrastea(TradingStrategy):
         if not send_notification:
             return
 
-        t_token = self.config.get_telegram_token()
         t_chat_ids = self.config.get_telegram_chat_ids()
         for chat_id in t_chat_ids:
-            TelegramBotWrapper(t_token).send_message(chat_id, message, reply_markup=reply_markup)
+            self.telegram.send_message(chat_id, message, reply_markup=reply_markup)
 
     def send_message_with_details(self, message, level=NotificationLevel.DEFAULT, reply_markup=None):
         symbol, bot_name, timeframe, trading_direction = (self.config.get_symbol(),
@@ -839,6 +841,7 @@ class Adrastea(TradingStrategy):
         )
         self.send_message(detailed_message, level, reply_markup)
 
+    @exception_handler
     async def signal_confirmation_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         await query.answer()
