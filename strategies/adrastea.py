@@ -550,7 +550,7 @@ class Adrastea(TradingStrategy):
             self.logger.info(f"Economic event occurred: {event_info}")
 
             event_name = event_info.get('event_name', 'Unknown Event')
-            minutes_until_event = int(event_info.get('seconds_until_event', 1) / 60)
+            minutes_until_event = math.ceil(event_info.get('seconds_until_event', 1) / 60)
             symbol, magic_number = (self.trading_config.get_symbol(), self.config.get_bot_magic_number())
 
             message = (
@@ -565,7 +565,8 @@ class Adrastea(TradingStrategy):
             )
 
             if not positions:
-                message = "ℹ️ No open positions found for forced closure due to the economic event."
+                await asyncio.sleep(1)
+                message = f"ℹ️ No open positions found for forced closure due to the economic event <b>{event_name}</b>."
                 self.logger.warning(message)
                 self.send_message_with_details(message)
             else:
