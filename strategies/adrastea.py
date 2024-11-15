@@ -579,12 +579,12 @@ class Adrastea(TradingStrategy):
                     )
                     if result and result.success:
                         message = (
-                            f"✅ Position {position.ticket} closed successfully due to the economic event: {event_name}.\n"
+                            f"✅ Position {position.ticket} closed successfully due to the economic event <b>{event_name}</b>.\n"
                             f"ℹ️ This action was taken to mitigate potential risks associated with the event's impact on the markets."
                         )
                     else:
                         message = (
-                            f"❌ Failed to close position {position.ticket} due to the economic event: {event_name}.\n"
+                            f"❌ Failed to close position {position.ticket} due to the economic event <b>{event_name}</b>.\n"
                             f"⚠️ Potential risks remain as the position could not be closed."
                         )
                     self.logger.info(message)
