@@ -103,7 +103,7 @@ if __name__ == "__main__":
 
     print(f"Config file: {config_file_param}")
 
-    executor = ThreadPoolExecutor(max_workers=5)
+    executor = ThreadPoolExecutor(max_workers=10)
     loop = asyncio.new_event_loop()
     loop.set_default_executor(executor)
     asyncio.set_event_loop(loop)
