@@ -119,11 +119,6 @@ class RequestResult:
     def success(self):
         return self._success
 
-    # Method to display a summary of the request and response
-    def display(self):
-        print(f"Trade Request Summary:\n")
-        print(self.to_str())
-
     def to_str(self) -> str:
         success_status = "Success" if self._success else "Failure"
         return (f"Symbol: {self._symbol}\n"

@@ -5,6 +5,7 @@ import math
 import sys
 import warnings
 from concurrent.futures import ThreadPoolExecutor
+from enum import global_str
 
 from brokers.broker_interface import BrokerAPI
 from notifiers.closed_positions_notifier import ClosedPositionNotifier
@@ -52,8 +53,8 @@ async def main(config: ConfigReader, trading_config: TradingConfiguration):
     mongo_db = MongoDB(bot_name=bot_name, host=config.get_mongo_host(), port=config.get_mongo_port())
 
     if not mongo_db.test_connection():
-        logger.error("MongoDB connection failed. Exiting...")
-        print("MongoDB connection failed. Exiting...")
+        logger.error(f"[{bot_name}] MongoDB connection failed. Exiting...")
+        print(f"[{bot_name}] MongoDB connection failed. Exiting...")
         return
 
     # Initialize the broker
@@ -122,8 +123,8 @@ if __name__ == "__main__":
 
     print(f"Config file: {config_file_param}")
 
-    config = ConfigReader.load_config(config_file_param=config_file_param)
-    trading_configs = config.get_trading_configurations()
+    global_config = ConfigReader.load_config(config_file_param=config_file_param)
+    trading_configs = global_config.get_trading_configurations()
 
     executor = ThreadPoolExecutor(max_workers=calculate_workers(len(trading_configs)))
     loop = asyncio.new_event_loop()
@@ -133,7 +134,7 @@ if __name__ == "__main__":
 
     async def run_all_tasks():
         tasks = [
-            main(config, trading_config) for trading_config in trading_configs
+            main(global_config, trading_config) for trading_config in trading_configs
         ]
         await asyncio.gather(*tasks)
 

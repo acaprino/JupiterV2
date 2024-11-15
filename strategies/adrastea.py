@@ -91,7 +91,7 @@ class Adrastea(TradingStrategy):
     @exception_handler
     async def start(self):
         self.logger.info("Starting the strategy.")
-        await self.telegram.start()
+        self.telegram.start()
         self.telegram.add_callback_query_handler(handler=self.signal_confirmation_handler)
 
     def get_minimum_frames_count(self):
@@ -823,7 +823,6 @@ class Adrastea(TradingStrategy):
 
         t_chat_ids = self.trading_config.get_telegram_config().get_chat_ids()
         for chat_id in t_chat_ids:
-            print(f"Sending message {message} to chat_id: {chat_id} and bot_name: {self.bot_name}")
             self.telegram.send_message(chat_id, message, reply_markup=reply_markup)
 
     def send_message_with_details(self, message, level=NotificationLevel.DEFAULT, reply_markup=None):

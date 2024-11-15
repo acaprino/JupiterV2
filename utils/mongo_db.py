@@ -61,7 +61,6 @@ class MongoDB:
         try:
             # The admin database is always present
             self._client.admin.command('ping')
-            print("Successfully connected to MongoDB.")
             return True
         except ConnectionFailure as e:
             self.logger.error(f"Failed to connect to MongoDB: {e}")
