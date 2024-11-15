@@ -18,9 +18,9 @@ class EconomicEventNotifier:
     based on provided symbol, importance level, and interval.
     """
 
-    def __init__(self, bot_name: str, broker: BrokerAPI, symbol: str, execution_lock: asyncio.Lock = None):
-        self.bot_name = bot_name
-        self.logger = BotLogger.get_logger(bot_name)
+    def __init__(self, worker_id: str, broker: BrokerAPI, symbol: str, execution_lock: asyncio.Lock = None):
+        self.worker_id = worker_id
+        self.logger = BotLogger.get_logger(worker_id)
         self.broker = broker
         self.symbol = symbol
         self.execution_lock = execution_lock
@@ -40,7 +40,7 @@ class EconomicEventNotifier:
     async def start(self):
         """Starts the notifier by initializing settings and launching the monitoring loop."""
         if not self._running:
-            self.sandbox_dir = await execute_broker_call(self.bot_name, self.broker.get_working_directory)
+            self.sandbox_dir = await execute_broker_call(self.worker_id, self.broker.get_working_directory)
             self.json_file_path = os.path.join(self.sandbox_dir, 'economic_calendar.json')
 
             self._running = True
@@ -75,7 +75,7 @@ class EconomicEventNotifier:
         """Main loop for checking economic events based on interval and market status."""
         while self._running:
             try:
-                if not await execute_broker_call(self.bot_name, self.broker.is_market_open, self.symbol):
+                if not await execute_broker_call(self.worker_id, self.broker.is_market_open, self.symbol):
                     self.logger.info(f"Market closed for {self.symbol}. Waiting for {self.interval_seconds / 60} minutes.")
                     await self.wait_next_run()
                     continue
@@ -150,7 +150,7 @@ class EconomicEventNotifier:
             return []
 
         try:
-            timezone_offset = await execute_broker_call(self.bot_name, self.broker.get_broker_timezone_offset, self.symbol)
+            timezone_offset = await execute_broker_call(self.worker_id, self.broker.get_broker_timezone_offset, self.symbol)
             with open(self.json_file_path, 'r') as file:
                 events = json.load(file)
                 for event in events:

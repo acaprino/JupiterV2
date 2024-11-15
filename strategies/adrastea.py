@@ -67,12 +67,12 @@ class Adrastea(TradingStrategy):
     Implementazione concreta della strategia di trading.
     """
 
-    def __init__(self, bot_name: str, broker: BrokerAPI, config: ConfigReader, trading_config: TradingConfiguration, execution_lock: asyncio.Lock):
+    def __init__(self, worker_id: str, broker: BrokerAPI, config: ConfigReader, trading_config: TradingConfiguration, execution_lock: asyncio.Lock):
         self.broker = broker
         self.config = config
-        self.bot_name = bot_name
+        self.worker_id = worker_id
         self.trading_config = trading_config
-        self.logger = BotLogger.get_logger(bot_name)
+        self.logger = BotLogger.get_logger(worker_id)
         self.execution_lock = execution_lock
         # Internal state
         self.initialized = False
@@ -82,7 +82,7 @@ class Adrastea(TradingStrategy):
         self.cur_state = None
         self.should_enter = False
         self.heikin_ashi_candles_buffer = int(1000 * trading_config.get_timeframe().to_hours())
-        self.telegram = TelegramBotWrapper(token=trading_config.get_telegram_config().get_token(), bot_name=bot_name)
+        self.telegram = TelegramBotWrapper(token=trading_config.get_telegram_config().get_token(), worker_id=worker_id)
         self.allow_last_tick = False
         self.market_open_event = asyncio.Event()
         self.bootstrap_completed_event = asyncio.Event()

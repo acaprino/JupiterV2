@@ -12,21 +12,21 @@ class TelegramBotWrapper:
     _instances = {}
     _lock = threading.Lock()
 
-    def __new__(cls, token, bot_name, *args, **kwargs):
+    def __new__(cls, token, worker_id, *args, **kwargs):
         with cls._lock:
             if token not in cls._instances:
                 cls._instances[token] = super(TelegramBotWrapper, cls).__new__(cls)
         return cls._instances[token]
 
-    def __init__(self, token, bot_name):
+    def __init__(self, token, worker_id):
         if hasattr(self, '_initialized') and self._initialized:
             return
         self.token = token
-        self.bot_name = bot_name
+        self.worker_id = worker_id
         self.application = None
         self.loop = None
         self.ready_event = threading.Event()
-        self.logger = BotLogger.get_logger(bot_name)
+        self.logger = BotLogger.get_logger(worker_id)
         self.message_queue = Queue()
         self._thread_lock = threading.Lock()
         self._is_running = False
@@ -35,7 +35,7 @@ class TelegramBotWrapper:
 
     def start(self):
         if self._is_running:
-            self.logger.warning(f"Bot {self.bot_name} is already running.")
+            self.logger.warning(f"Bot {self.worker_id} is already running.")
             return
 
         self._is_running = True
@@ -80,7 +80,7 @@ class TelegramBotWrapper:
 
     def stop(self):
         if not self._is_running:
-            self.logger.warning(f"Bot {self.bot_name} is not running.")
+            self.logger.warning(f"Bot {self.worker_id} is not running.")
             return
 
         if self.application:

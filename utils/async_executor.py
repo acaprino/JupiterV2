@@ -9,7 +9,7 @@ executor = ThreadPoolExecutor(max_workers=1)
 
 
 @exception_handler
-async def execute_broker_call(bot_name, func, *args, **kwargs):
+async def execute_broker_call(worker_id, func, *args, **kwargs):
     """
     Executes a blocking broker call asynchronously by running it in a separate thread.
 
@@ -21,9 +21,11 @@ async def execute_broker_call(bot_name, func, *args, **kwargs):
     - The result of the function call, or None if an error occurs.
     """
     loop = asyncio.get_running_loop()
+    logger = BotLogger.get_logger(worker_id)
     try:
+        logger.debug(f"Executing broker call: {func.__name__} with args: {args} and kwargs: {kwargs}")
         # Execute the function in the thread pool and wait for the result
         return await loop.run_in_executor(executor, func, *args, **kwargs)
     except Exception as e:
-        BotLogger.get_logger(bot_name).critical(f"Error in execute_broker_call: {e}")
+        logger.critical(f"Error in execute_broker_call: {e}")
         return None

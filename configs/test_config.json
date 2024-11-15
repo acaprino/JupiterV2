@@ -11,15 +11,15 @@
     "configurations": [
       {
         "symbol": "EURUSD",
-        "timeframe": "M1",
+        "timeframe": "H4",
         "trading_direction": "LONG",
-        "risk_percent": 0.01
-      },
-      {
-        "symbol": "EURUSD",
-        "timeframe": "M5",
-        "trading_direction": "LONG",
-        "risk_percent": 0.02
+        "risk_percent": 0.02,
+        "telegram": {
+          "token": "7472156865:AAGwCB5MMlRNN4Bd59o_ZwpK1pHDFRFUVhc",
+          "chat_ids": [
+            "98954367"
+          ]
+        }
       }
     ],
     "default_risk_percent": 0.01
@@ -31,14 +31,6 @@
     "symbols_db_sheet_id": "1sVwbbDDXzx7JtP2LY3ghxL6StYNOlTK8nz0qMD7mEhY",
     "logging_level": "DEBUG",
     "mode": "SIGNAL_GENERATOR"
-  },
-  "telegram": {
-    "token": "7472156865:AAGwCB5MMlRNN4Bd59o_ZwpK1pHDFRFUVhc",
-    "chat_ids": [
-      "98954367"
-    ],
-    "active": true,
-    "notification_level": "debug"
   },
   "mongo": {
     "host": "192.54.56.115",

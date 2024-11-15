@@ -41,37 +41,34 @@ def calculate_workers(num_configs, max_workers=500):
 
 
 @exception_handler
-async def main(config: ConfigReader, trading_config: TradingConfiguration):
+async def main(config: ConfigReader, trading_config: TradingConfiguration, broker: BrokerAPI):
     """
     Main function that starts the asynchronous trading bot.
     """
 
     # Configure logging
-    bot_name = f"{config.get_bot_name()}_{trading_config.get_symbol()}_{trading_config.get_timeframe().name}_{trading_config.get_trading_direction().name}"
-    logger = BotLogger.get_logger(name=f"{bot_name}", level=config.get_bot_logging_level().upper())
+    worker_id = f"{config.get_bot_name()}_{trading_config.get_symbol()}_{trading_config.get_timeframe().name}_{trading_config.get_trading_direction().name}"
+    logger = BotLogger.get_logger(name=f"{worker_id}", level=config.get_bot_logging_level().upper())
     warnings.filterwarnings('ignore', category=FutureWarning)
-    mongo_db = MongoDB(bot_name=bot_name, host=config.get_mongo_host(), port=config.get_mongo_port())
+    mongo_db = MongoDB(bot_name=config.get_bot_name(), host=config.get_mongo_host(), port=config.get_mongo_port())
 
     if not mongo_db.test_connection():
-        logger.error(f"[{bot_name}] MongoDB connection failed. Exiting...")
-        print(f"[{bot_name}] MongoDB connection failed. Exiting...")
+        logger.error(f"[{worker_id}] MongoDB connection failed. Exiting...")
+        print(f"[{worker_id}] MongoDB connection failed. Exiting...")
         return
-
-    # Initialize the broker
-    broker: BrokerAPI = MT5Broker(bot_name=bot_name, account=config.get_broker_account(), password=config.get_broker_password(), server=config.get_broker_server(), path=config.get_broker_mt5_path())
 
     # Create the lock to synchronize executions
     execution_lock = asyncio.Lock()
 
     # Initialize the MarketStateNotifier
-    tick_notifier = TickNotifier(bot_name=bot_name, timeframe=trading_config.get_timeframe(), execution_lock=execution_lock)
+    tick_notifier = TickNotifier(worker_id=worker_id, timeframe=trading_config.get_timeframe(), execution_lock=execution_lock)
 
-    market_state_notifier = MarketStateNotifier(bot_name=bot_name, broker=broker, symbol=trading_config.get_symbol(), execution_lock=execution_lock)
-    economic_event_notifier = EconomicEventNotifier(bot_name=bot_name, broker=broker, symbol=trading_config.get_symbol(), execution_lock=execution_lock)
-    closed_deals_notifier = ClosedPositionNotifier(bot_name=bot_name, broker=broker, symbol=trading_config.get_symbol(), magic_number=config.get_bot_magic_number(), execution_lock=execution_lock)
+    market_state_notifier = MarketStateNotifier(worker_id=worker_id, broker=broker, symbol=trading_config.get_symbol(), execution_lock=execution_lock)
+    economic_event_notifier = EconomicEventNotifier(worker_id=worker_id, broker=broker, symbol=trading_config.get_symbol(), execution_lock=execution_lock)
+    closed_deals_notifier = ClosedPositionNotifier(worker_id=worker_id, broker=broker, symbol=trading_config.get_symbol(), magic_number=config.get_bot_magic_number(), execution_lock=execution_lock)
 
     # Instantiate the strategy
-    strategy = Adrastea(bot_name=bot_name, broker=broker, config=config, trading_config=trading_config, execution_lock=execution_lock)
+    strategy = Adrastea(worker_id=worker_id, broker=broker, config=config, trading_config=trading_config, execution_lock=execution_lock)
 
     # Register event handlers
     tick_notifier.register_on_new_tick(strategy.on_new_tick)
@@ -131,10 +128,14 @@ if __name__ == "__main__":
     loop.set_default_executor(executor)
     asyncio.set_event_loop(loop)
 
+    # Initialize the broker
+    broker_instance: BrokerAPI = MT5Broker(bot_name=global_config.get_bot_name(), account=global_config.get_broker_account(), password=global_config.get_broker_password(),
+                                           server=global_config.get_broker_server(), path=global_config.get_broker_mt5_path())
+
 
     async def run_all_tasks():
         tasks = [
-            main(global_config, trading_config) for trading_config in trading_configs
+            main(global_config, trading_config, broker_instance) for trading_config in trading_configs
         ]
         await asyncio.gather(*tasks)
 

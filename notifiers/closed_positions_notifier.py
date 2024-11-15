@@ -15,9 +15,9 @@ class ClosedPositionNotifier:
     Monitors closed positions for a specific symbol and magic number, triggering registered callbacks when changes occur.
     """
 
-    def __init__(self, bot_name: str, broker: BrokerAPI, symbol: str, magic_number: int, execution_lock: asyncio.Lock = None):
-        self.bot_name = bot_name
-        self.logger = BotLogger.get_logger(bot_name)
+    def __init__(self, worker_id: str, broker: BrokerAPI, symbol: str, magic_number: int, execution_lock: asyncio.Lock = None):
+        self.worker_id = worker_id
+        self.logger = BotLogger.get_logger(worker_id)
         self.broker = broker
         self.symbol = symbol
         self.magic_number = magic_number
@@ -37,7 +37,7 @@ class ClosedPositionNotifier:
             self._task = asyncio.create_task(self._run())
 
             # Set the initial last check timestamp adjusted to broker's timezone
-            timezone_offset = await execute_broker_call(self.bot_name, self.broker.get_broker_timezone_offset, self.symbol)
+            timezone_offset = await execute_broker_call(self.worker_id, self.broker.get_broker_timezone_offset, self.symbol)
             if timezone_offset is not None:
                 self.last_check_timestamp = now_utc() - timedelta(hours=timezone_offset)
                 self.started_with_closed_marked = True
@@ -67,12 +67,12 @@ class ClosedPositionNotifier:
                 await asyncio.sleep(self.interval_seconds)
 
                 # Check if the market is open before proceeding
-                if not await execute_broker_call(self.bot_name, self.broker.is_market_open, self.symbol):
+                if not await execute_broker_call(self.worker_id, self.broker.is_market_open, self.symbol):
                     self.logger.debug(f"Market for {self.symbol} is closed. Skipping closed position monitoring.")
                     continue
 
                 # Adjust current time to broker's timezone and set check interval
-                timezone_offset = await execute_broker_call(self.bot_name, self.broker.get_broker_timezone_offset, self.symbol)
+                timezone_offset = await execute_broker_call(self.worker_id, self.broker.get_broker_timezone_offset, self.symbol)
                 now = now_utc()
                 prev_check_timestamp = now - timedelta(seconds=self.interval_seconds) - timedelta(hours=timezone_offset)
                 if exception:
@@ -85,7 +85,7 @@ class ClosedPositionNotifier:
 
                 # Retrieve closed positions within the time interval
                 closed_positions = await execute_broker_call(
-                    self.bot_name,
+                    self.worker_id,
                     self.broker.get_historical_positions,
                     prev_check_timestamp,
                     current_time_utc,
