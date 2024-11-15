@@ -19,12 +19,12 @@ from utils.bot_logger import BotLogger
 from utils.error_handler import exception_handler
 from utils.mongo_db import MongoDB
 
+
 @exception_handler
 async def main(config: ConfigReader, trading_config: TradingConfiguration):
     """
     Main function that starts the asynchronous trading bot.
     """
-
 
     # Configure logging
     bot_name = f"{config.get_bot_name()}_{trading_config.get_symbol()}_{trading_config.get_timeframe().name}_{trading_config.get_trading_direction().name}"
@@ -51,7 +51,7 @@ async def main(config: ConfigReader, trading_config: TradingConfiguration):
     closed_deals_notifier = ClosedPositionNotifier(bot_name=bot_name, broker=broker, symbol=trading_config.get_symbol(), magic_number=config.get_bot_magic_number(), execution_lock=execution_lock)
 
     # Instantiate the strategy
-    strategy = Adrastea(broker, config, trading_config, execution_lock)
+    strategy = Adrastea(bot_name=bot_name, broker=broker, config=config, trading_config=trading_config, execution_lock=execution_lock)
 
     # Register event handlers
     tick_notifier.register_on_new_tick(strategy.on_new_tick)

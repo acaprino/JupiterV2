@@ -67,11 +67,11 @@ class Adrastea(TradingStrategy):
     Implementazione concreta della strategia di trading.
     """
 
-    def __init__(self, broker: BrokerAPI, config: ConfigReader, trading_config: TradingConfiguration, execution_lock: asyncio.Lock):
+    def __init__(self, bot_name: str, broker: BrokerAPI, config: ConfigReader, trading_config: TradingConfiguration, execution_lock: asyncio.Lock):
         self.broker = broker
         self.config = config
         self.trading_config = trading_config
-        self.logger = BotLogger.get_logger(config.get_bot_name())
+        self.logger = BotLogger.get_logger(bot_name)
         self.execution_lock = execution_lock
         # Internal state
         self.initialized = False
@@ -81,12 +81,12 @@ class Adrastea(TradingStrategy):
         self.cur_state = None
         self.should_enter = False
         self.heikin_ashi_candles_buffer = int(1000 * trading_config.get_timeframe().to_hours())
-        self.telegram = TelegramBotWrapper(token=config.get_telegram_token(), bot_name=config.get_bot_name())
+        self.telegram = TelegramBotWrapper(token=config.get_telegram_token(), bot_name=bot_name)
         self.allow_last_tick = False
         self.telegram.start()
         self.market_open_event = asyncio.Event()
         self.bootstrap_completed_event = asyncio.Event()
-        self.telegram.add_command_callback_handler(self.signal_confirmation_handler)
+        self.telegram.add_callback_query_handler(handler=self.signal_confirmation_handler)
         self.live_candles_logger = CandlesLogger(trading_config.get_symbol(), trading_config.get_timeframe(), trading_config.get_trading_direction())
 
     def get_minimum_frames_count(self):
@@ -565,7 +565,6 @@ class Adrastea(TradingStrategy):
             )
 
             if not positions:
-                await asyncio.sleep(1)
                 message = f"ℹ️ No open positions found for forced closure due to the economic event <b>{event_name}</b>."
                 self.logger.warning(message)
                 self.send_message_with_details(message)
