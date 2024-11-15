@@ -105,7 +105,6 @@ class ConfigReader:
             "version": float,
             "name": str,
             "magic_number": int,
-            "symbols_db_sheet_id": str,
             "logging_level": str,
             "mode": str,
         },
@@ -265,9 +264,6 @@ class ConfigReader:
 
     def get_bot_magic_number(self) -> int:
         return self.bot_config.get("magic_number")
-
-    def get_bot_symbols_db_sheet_id(self) -> str:
-        return self.bot_config.get("symbols_db_sheet_id")
 
     def get_bot_logging_level(self) -> str:
         return self.bot_config.get("logging_level")
