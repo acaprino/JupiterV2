@@ -1,6 +1,7 @@
 # main.py
 import argparse
 import asyncio
+import math
 import sys
 import warnings
 from concurrent.futures import ThreadPoolExecutor
@@ -18,6 +19,24 @@ from utils.async_executor import executor
 from utils.bot_logger import BotLogger
 from utils.error_handler import exception_handler
 from utils.mongo_db import MongoDB
+
+
+def calculate_workers(num_configs, max_workers=500):
+    """
+    Calcola il numero di worker con una crescita continua e bilanciata:
+    - Mediamente 5 worker per configurazione per pochi task.
+    - Mediamente 2.5 worker per configurazione per molti task.
+
+    :param num_configs: Numero di configurazioni.
+    :param max_workers: Numero massimo di worker consentiti.
+    :return: Numero di worker calcolato.
+    """
+    if num_configs <= 1:
+        return 5  # Minimo 5 worker per 1 configurazione
+
+    # Formula continua: combinazione scalata
+    workers = num_configs * (5 - min(2.5, 2.5 * math.log(num_configs, 15)))
+    return min(max_workers, max(num_configs, int(workers)))
 
 
 @exception_handler
@@ -103,20 +122,21 @@ if __name__ == "__main__":
 
     print(f"Config file: {config_file_param}")
 
-    executor = ThreadPoolExecutor(max_workers=10)
+    config = ConfigReader.load_config(config_file_param=config_file_param)
+    trading_configs = config.get_trading_configurations()
+
+    executor = ThreadPoolExecutor(max_workers=calculate_workers(len(trading_configs)))
     loop = asyncio.new_event_loop()
     loop.set_default_executor(executor)
     asyncio.set_event_loop(loop)
 
-    config = ConfigReader.load_config(config_file_param=config_file_param)
-
-    trading_configs = config.get_trading_configurations()
 
     async def run_all_tasks():
         tasks = [
             main(config, trading_config) for trading_config in trading_configs
         ]
         await asyncio.gather(*tasks)
+
 
     # Run all tasks asynchronously
     try:
