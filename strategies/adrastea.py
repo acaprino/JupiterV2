@@ -83,11 +83,15 @@ class Adrastea(TradingStrategy):
         self.heikin_ashi_candles_buffer = int(1000 * trading_config.get_timeframe().to_hours())
         self.telegram = TelegramBotWrapper(token=config.get_telegram_token(), bot_name=bot_name)
         self.allow_last_tick = False
-        self.telegram.start()
         self.market_open_event = asyncio.Event()
         self.bootstrap_completed_event = asyncio.Event()
-        self.telegram.add_callback_query_handler(handler=self.signal_confirmation_handler)
         self.live_candles_logger = CandlesLogger(trading_config.get_symbol(), trading_config.get_timeframe(), trading_config.get_trading_direction())
+
+    @exception_handler
+    async def start(self):
+        self.logger.info("Starting the strategy.")
+        await self.telegram.start()
+        self.telegram.add_callback_query_handler(handler=self.signal_confirmation_handler)
 
     def get_minimum_frames_count(self):
         return max(super_trend_fast_period,

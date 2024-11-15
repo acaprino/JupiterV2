@@ -14,9 +14,17 @@ class TradingStrategy(ABC):
     """
 
     @abstractmethod
+    async def start(self):
+        """
+        Method called to start the strategy engine.
+        """
+        pass
+
+    @abstractmethod
     async def initialize(self):
         """
         Method called to initialize the strategy before processing the first candles.
+        This method is run asynchronously after the strategy is started, so other callbacks can be called while the strategy is still initializing.
         """
         pass
 

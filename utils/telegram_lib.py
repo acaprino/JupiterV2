@@ -1,8 +1,8 @@
 import asyncio
-
-from pyparsing import Optional
+import threading
+from queue import Queue
 from telegram.constants import ParseMode
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler
+from telegram.ext import Application, CallbackQueryHandler
 
 from utils.bot_logger import BotLogger
 from utils.error_handler import exception_handler
@@ -22,77 +22,62 @@ class TelegramBotWrapper:
             return  # Prevent reinitialization
         self.token = token
         self.application = None
-        self.loop = asyncio.get_event_loop()
-        self.message_queue = asyncio.Queue()
+        self.bot_thread = None
+        self.loop = None
+        self.ready_event = threading.Event()
         self.logger = BotLogger.get_logger(bot_name)
+        self.message_queue = Queue()
         self._initialized = True  # Mark instance as initialized
 
-    async def start(self):
-        """Start the bot application and the message processing loop."""
+    def start(self):
+        self.bot_thread = threading.Thread(target=self._run_bot)
+        self.bot_thread.start()
+        self.ready_event.wait()
+
+    def _run_bot(self):
+        try:
+            self.loop = asyncio.get_event_loop()
+        except RuntimeError:  # No loop found
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
+
         self.application = Application.builder().token(self.token).build()
 
-        # Initialize the bot
-        await self.application.initialize()
+        # Initialize and signal that the bot is ready
+        self.loop.run_until_complete(self.application.initialize())
+        self.ready_event.set()
 
         # Start the message processing task
-        asyncio.create_task(self._process_queue())
+        asyncio.run_coroutine_threadsafe(self._process_queue(), self.loop)
 
-        # Start polling
-        await self.application.run_polling()
+        # Start polling and keep the bot running
+        self.loop.run_until_complete(self.application.run_polling())
 
     async def _process_queue(self):
         """Process the message queue to send messages in order."""
         while True:
-            chat_id, text, reply_markup = await self.message_queue.get()
+            chat_id, text, reply_markup = self.message_queue.get()
             try:
                 await self._send_message(chat_id, text, reply_markup)
             except Exception as e:
                 self.logger.error(f"Failed to send message: {e}")
-            finally:
-                self.message_queue.task_done()
+            self.message_queue.task_done()
 
     def send_message(self, chat_id, text, reply_markup=None):
-        """Enqueue a message to be sent."""
-        asyncio.run_coroutine_threadsafe(
-            self.message_queue.put((chat_id, text, reply_markup)),
-            self.loop
-        )
+        # Ensure the bot is fully initialized before queuing a message
+        if self.ready_event.is_set():
+            self.message_queue.put((chat_id, text, reply_markup))
 
     @exception_handler
     async def _send_message(self, chat_id, text, reply_markup=None):
-        """Send a message asynchronously."""
-        await self.application.bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            reply_markup=reply_markup,
-            parse_mode=ParseMode.HTML
-        )
+        await self.application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
-    async def stop(self):
-        """Stop the bot and clean up resources."""
-        await self.application.shutdown()
-        await self.application.stop()
+    def stop(self):
+        if self.loop:
+            self.loop.call_soon_threadsafe(self.loop.stop)
+        if self.bot_thread:
+            self.bot_thread.join()
 
-    def add_command_callback_handler(self, command: str, handler):
-        """
-        Add a command handler to the bot's application.
-
-        :param command: The command to trigger this handler (without '/').
-        :param handler: The async function to handle the command.
-        """
+    def add_command_callback_handler(self, handler):
         if self.application:
-            self.application.add_handler(CommandHandler(command, handler))
-        else:
-            self.logger.error("Application not initialized. Cannot add command handler.")
-
-    def add_callback_query_handler(self, handler, pattern: str = None):
-        """
-        Add a callback query handler to the bot's application.
-
-        :param handler: The async function to handle the callback.
-        :param pattern: (Optional) Regex pattern to filter callback data. Default is None.
-        """
-        if self.application:
-            self.application.add_handler(CallbackQueryHandler(handler, pattern=pattern))
-        else:
-            self.logger.error("Application not initialized. Cannot add callback query handler.")
+            self.application.add_handler(CallbackQueryHandler(handler))

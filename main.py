@@ -61,6 +61,7 @@ async def main(config: ConfigReader, trading_config: TradingConfiguration):
 
     # Execute the strategy bootstrap method
 
+    await strategy.start()
     asyncio.create_task(strategy.initialize())
     await market_state_notifier.start()
     await tick_notifier.start()
