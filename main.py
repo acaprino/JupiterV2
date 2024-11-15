@@ -5,7 +5,6 @@ import math
 import sys
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from enum import global_str
 
 from brokers.broker_interface import BrokerAPI
 from notifiers.closed_positions_notifier import ClosedPositionNotifier
@@ -41,7 +40,7 @@ def calculate_workers(num_configs, max_workers=500):
 
 
 @exception_handler
-async def main(config: ConfigReader, trading_config: TradingConfiguration, broker: BrokerAPI):
+async def main(config: ConfigReader, trading_config: TradingConfiguration, broker: BrokerAPI, database: MongoDB):
     """
     Main function that starts the asynchronous trading bot.
     """
@@ -50,12 +49,6 @@ async def main(config: ConfigReader, trading_config: TradingConfiguration, broke
     worker_id = f"{config.get_bot_name()}_{trading_config.get_symbol()}_{trading_config.get_timeframe().name}_{trading_config.get_trading_direction().name}"
     logger = BotLogger.get_logger(name=f"{worker_id}", level=config.get_bot_logging_level().upper())
     warnings.filterwarnings('ignore', category=FutureWarning)
-    mongo_db = MongoDB(bot_name=config.get_bot_name(), host=config.get_mongo_host(), port=config.get_mongo_port())
-
-    if not mongo_db.test_connection():
-        logger.error(f"[{worker_id}] MongoDB connection failed. Exiting...")
-        print(f"[{worker_id}] MongoDB connection failed. Exiting...")
-        return
 
     # Create the lock to synchronize executions
     execution_lock = asyncio.Lock()
@@ -68,7 +61,7 @@ async def main(config: ConfigReader, trading_config: TradingConfiguration, broke
     closed_deals_notifier = ClosedPositionNotifier(worker_id=worker_id, broker=broker, symbol=trading_config.get_symbol(), magic_number=config.get_bot_magic_number(), execution_lock=execution_lock)
 
     # Instantiate the strategy
-    strategy = Adrastea(worker_id=worker_id, broker=broker, config=config, trading_config=trading_config, execution_lock=execution_lock)
+    strategy = Adrastea(worker_id=worker_id, broker=broker, database=database, config=config, trading_config=trading_config, execution_lock=execution_lock)
 
     # Register event handlers
     tick_notifier.register_on_new_tick(strategy.on_new_tick)
@@ -131,11 +124,18 @@ if __name__ == "__main__":
     # Initialize the broker
     broker_instance: BrokerAPI = MT5Broker(bot_name=global_config.get_bot_name(), account=global_config.get_broker_account(), password=global_config.get_broker_password(),
                                            server=global_config.get_broker_server(), path=global_config.get_broker_mt5_path())
+    mongo_db = MongoDB(bot_name=global_config.get_bot_name(), host=global_config.get_mongo_host(), port=global_config.get_mongo_port(), db_name=global_config.get_mongo_db_name())
+
+    loop.run_until_complete(mongo_db.connect())
+    if not loop.run_until_complete(mongo_db.test_connection()):
+        BotLogger.get_logger(global_config.get_bot_name(), ).error("MongoDB connection failed. Exiting...")
+        print("MongoDB connection failed. Exiting...")
+        exit(1)
 
 
     async def run_all_tasks():
         tasks = [
-            main(global_config, trading_config, broker_instance) for trading_config in trading_configs
+            main(global_config, trading_config, broker_instance, mongo_db) for trading_config in trading_configs
         ]
         await asyncio.gather(*tasks)
 
@@ -145,3 +145,4 @@ if __name__ == "__main__":
         loop.run_until_complete(run_all_tasks())
     finally:
         loop.close()
+        mongo_db.disconnect()

@@ -275,8 +275,8 @@ class ConfigReader:
     def get_mongo_host(self) -> str:
         return self.mongo_config.get("host")
 
-    def get_mongo_port(self) -> str:
-        return self.mongo_config.get("port")
+    def get_mongo_port(self) -> int:
+        return int(self.mongo_config.get("port"))
 
     def get_mongo_db_name(self) -> str:
         return self.mongo_config.get("db_name")

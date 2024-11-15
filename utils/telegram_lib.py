@@ -44,14 +44,18 @@ class TelegramBotWrapper:
 
     def _run_bot(self):
         try:
-            self.loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.loop)
+            try:
+                self.loop = asyncio.get_running_loop()
+                self.logger.info("Using existing running event loop.")
+            except RuntimeError:
+                self.loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(self.loop)
+                self.logger.info("Created and set a new event loop.")
 
             self.application = Application.builder().token(self.token).build()
+
             self.loop.run_until_complete(self.application.initialize())
-
             self.ready_event.set()
-
             self.loop.run_until_complete(self.application.run_polling())
         except Exception as e:
             self.logger.error(f"Error in bot thread: {e}")
@@ -94,13 +98,32 @@ class TelegramBotWrapper:
         self._is_running = False
 
     def add_command_callback_handler(self, command: str, handler):
-        if self.application:
-            self.application.add_handler(CommandHandler(command, handler))
-        else:
-            self.logger.error("Application not initialized. Cannot add command handler.")
+        if not self.ready_event.wait(timeout=10):
+            self.logger.error("Timeout while waiting for the application to be initialized.")
+            return
+
+        with self._thread_lock:
+            if self.application:
+                try:
+                    self.application.add_handler(CommandHandler(command, handler))
+                    self.logger.info(f"Added command handler for '{command}'.")
+                except Exception as e:
+                    self.logger.error(f"Failed to add command handler for '{command}': {e}")
+            else:
+                self.logger.error("Application not initialized. Cannot add command handler.")
 
     def add_callback_query_handler(self, handler, pattern: str = None):
-        if self.application:
-            self.application.add_handler(CallbackQueryHandler(handler, pattern=pattern))
-        else:
-            self.logger.error("Application not initialized. Cannot add callback query handler.")
+        if not self.ready_event.wait(timeout=10):
+            self.logger.error("Timeout while waiting for the application to be initialized.")
+            return
+
+        with self._thread_lock:
+            if self.application:
+                try:
+                    self.application.add_handler(CallbackQueryHandler(handler, pattern=pattern))
+                    self.logger.info(f"Added callback query handler with pattern '{pattern}'.")
+                except Exception as e:
+                    self.logger.error(f"Failed to add callback query handler: {e}")
+            else:
+                self.logger.error("Application not initialized. Cannot add callback query handler.")
+

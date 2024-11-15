@@ -67,7 +67,7 @@ class Adrastea(TradingStrategy):
     Implementazione concreta della strategia di trading.
     """
 
-    def __init__(self, worker_id: str, broker: BrokerAPI, config: ConfigReader, trading_config: TradingConfiguration, execution_lock: asyncio.Lock):
+    def __init__(self, worker_id: str, broker: BrokerAPI, database: MongoDB, config: ConfigReader, trading_config: TradingConfiguration, execution_lock: asyncio.Lock):
         self.broker = broker
         self.config = config
         self.worker_id = worker_id
@@ -81,6 +81,7 @@ class Adrastea(TradingStrategy):
         self.prev_state = None
         self.cur_state = None
         self.should_enter = False
+        self.database = database
         self.heikin_ashi_candles_buffer = int(1000 * trading_config.get_timeframe().to_hours())
         self.telegram = TelegramBotWrapper(token=trading_config.get_telegram_config().get_token(), worker_id=worker_id)
         self.allow_last_tick = False
@@ -500,7 +501,7 @@ class Adrastea(TradingStrategy):
         }
 
         # Retrieve the signal confirmation from MongoDB
-        signal_confirmation = MongoDB(self.config.get_bot_name()).find_one("signals_confirmation", signal_id)
+        signal_confirmation = self.database.find_one("signals_confirmation", signal_id)
 
         if not signal_confirmation:
             self.logger.error(f"No confirmation found for signal with open time {open_dt} and close time {close_dt}")
@@ -916,10 +917,10 @@ class Adrastea(TradingStrategy):
             "chat_username": chat_username
         }
         self.logger.debug(f"Database object to upsert: {obj}")
-        MongoDB(self.config.get_bot_name()).upsert("signals_confirmation", {"bot_name": bot_name,
-                                                                            "magic_number": int(magic),
-                                                                            "open_time": open_dt,
-                                                                            "close_time": close_dt}, obj)
+        self.database.upsert("signals_confirmation", {"bot_name": bot_name,
+                                                      "magic_number": int(magic),
+                                                      "open_time": open_dt,
+                                                      "close_time": close_dt}, obj)
         self.logger.debug("Database updated with new signal confirmation")
 
         choice_text = "✅ Confirm" if confirmed else "🚫 Ignore"
