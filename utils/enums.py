@@ -103,3 +103,9 @@ class OrderSource(Enum):
     MANUAL = "Manual"
     BOT = "Bot"
     OTHER = "Other"
+
+
+class Mode(Enum):
+    STANDALONE = "STANDALONE"
+    SIGNAL_GENERATOR = "SIGNAL_GENERATOR"
+    ORDER_PLACER = "ORDER_PLACER"

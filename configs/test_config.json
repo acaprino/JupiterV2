@@ -1,6 +1,6 @@
 {
   "enabled": true,
-  "mt5": {
+  "broker": {
     "timeout": 10000,
     "account": 22007382,
     "password": ".7mnnH6v-uaB",
@@ -8,17 +8,29 @@
     "mt5_path": "C:/Program Files/MetaTrader 5/terminal64.exe"
   },
   "trading": {
-    "symbol": "EURUSD",
-    "timeframe": "M1",
-    "trading_direction": "LONG",
-    "risk_percent": 0.01
+    "configurations": [
+      {
+        "symbol": "EURUSD",
+        "timeframe": "M1",
+        "trading_direction": "LONG",
+        "risk_percent": 0.01
+      },
+      {
+        "symbol": "EURUSD",
+        "timeframe": "M5",
+        "trading_direction": "LONG",
+        "risk_percent": 0.02
+      }
+    ],
+    "default_risk_percent": 0.01
   },
   "bot": {
     "version": 1.0,
     "name": "dev",
     "magic_number": 70943,
     "symbols_db_sheet_id": "1sVwbbDDXzx7JtP2LY3ghxL6StYNOlTK8nz0qMD7mEhY",
-    "logging_level": "DEBUG"
+    "logging_level": "DEBUG",
+    "mode": "SIGNAL_GENERATOR"
   },
   "telegram": {
     "token": "7472156865:AAGwCB5MMlRNN4Bd59o_ZwpK1pHDFRFUVhc",

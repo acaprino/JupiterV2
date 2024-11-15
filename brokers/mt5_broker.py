@@ -52,7 +52,7 @@ REASON_MAPPING = {
 
 class MT5Broker(BrokerAPI):
 
-    def __init__(self, bot_name: str):
+    def __init__(self, bot_name: str, account: int = 0, password: str = "", server: str = "", path: str = ""):
         self.bot_name = bot_name
         self.logger = BotLogger.get_logger(bot_name)
 
@@ -63,10 +63,10 @@ class MT5Broker(BrokerAPI):
         self.logger.info("MT5 initialized successfully")
 
         # Set up connection with MT5 account
-        config = ConfigReader.get_config(self.bot_name)
-        account = config.get_mt5_account()
+        # config = ConfigReader.get_config(self.bot_name)
+
         self.logger.info(f"Trying to connect with account {account} and provided server credentials.")
-        if not mt5.login(account, password=config.get_mt5_password(), server=config.get_mt5_server()):
+        if not mt5.login(account, password=password, server=server):
             self.logger.error(f"Failed to connect to account #{account}, error code: {mt5.last_error()}")
             raise Exception("Failed to initialize MT5")
         self.logger.info("Login success")

@@ -2,7 +2,7 @@ import logging
 import inspect
 import os
 from logging.handlers import RotatingFileHandler
-from typing import Dict
+from typing import Dict, Optional
 
 from utils.config import ConfigReader
 
@@ -16,7 +16,7 @@ class BotLogger:
     # Class-level dictionary to store logger instances
     _loggers: Dict[str, 'BotLogger'] = {}
 
-    def __init__(self, bot_name: str):
+    def __init__(self, bot_name: str, level: Optional[str] = 'INFO'):
         """
         Initializes a Logger instance.
 
@@ -27,7 +27,7 @@ class BotLogger:
         """
         self.name = bot_name
         self.log_file_path = f"logs/{self.name}.log"
-        self.level = ConfigReader.get_config(self.name).get_bot_logging_level().upper()
+        self.level = level.upper()
         self.logger = logging.getLogger(self.name)
         self._configure_logger()
 
@@ -83,7 +83,7 @@ class BotLogger:
             self.logger.propagate = False  # Prevent log messages from being propagated to the root logger
 
     @classmethod
-    def get_logger(cls, name: str) -> 'BotLogger':
+    def get_logger(cls, name: str, level: Optional[str] = "INFO") -> 'BotLogger':
         """
         Factory method to get a Logger instance.
 
@@ -98,7 +98,7 @@ class BotLogger:
         logger_key = name.lower()
 
         if logger_key not in cls._loggers:
-            cls._loggers[logger_key] = cls(name)
+            cls._loggers[logger_key] = cls(name, level)
 
         return cls._loggers[logger_key]
 

@@ -18,7 +18,7 @@ from dto.TradeOrder import TradeOrder
 from strategies.base_strategy import TradingStrategy
 from strategies.indicators import supertrend, stochastic, average_true_range
 from utils.async_executor import execute_broker_call
-from utils.config import ConfigReader
+from utils.config import ConfigReader, TradingConfiguration
 from utils.enums import Indicators, Timeframe, TradingDirection, OpType, NotificationLevel, OrderSource
 from utils.error_handler import exception_handler
 from brokers.broker_interface import BrokerAPI
@@ -67,9 +67,10 @@ class Adrastea(TradingStrategy):
     Implementazione concreta della strategia di trading.
     """
 
-    def __init__(self, broker: BrokerAPI, config: ConfigReader, execution_lock: asyncio.Lock):
+    def __init__(self, broker: BrokerAPI, config: ConfigReader, trading_config: TradingConfiguration, execution_lock: asyncio.Lock):
         self.broker = broker
         self.config = config
+        self.trading_config = trading_config
         self.logger = BotLogger.get_logger(config.get_bot_name())
         self.execution_lock = execution_lock
         # Internal state
@@ -79,14 +80,14 @@ class Adrastea(TradingStrategy):
         self.prev_state = None
         self.cur_state = None
         self.should_enter = False
-        self.heikin_ashi_candles_buffer = int(1000 * config.get_timeframe().to_hours())
+        self.heikin_ashi_candles_buffer = int(1000 * trading_config.get_timeframe().to_hours())
         self.telegram = TelegramBotWrapper(token=config.get_telegram_token(), bot_name=config.get_bot_name())
         self.allow_last_tick = False
         self.telegram.start()
         self.market_open_event = asyncio.Event()
         self.bootstrap_completed_event = asyncio.Event()
         self.telegram.add_command_callback_handler(self.signal_confirmation_handler)
-        self.live_candles_logger = CandlesLogger(config.get_symbol(), config.get_timeframe(), config.get_trading_direction())
+        self.live_candles_logger = CandlesLogger(trading_config.get_symbol(), trading_config.get_timeframe(), trading_config.get_trading_direction())
 
     def get_minimum_frames_count(self):
         return max(super_trend_fast_period,
@@ -97,7 +98,7 @@ class Adrastea(TradingStrategy):
 
     def notify_state_change(self, rates, i):
         symbol, timeframe, trading_direction = (
-            self.config.get_symbol(), self.config.get_timeframe(), self.config.get_trading_direction()
+            self.trading_config.get_symbol(), self.trading_config.get_timeframe(), self.trading_config.get_trading_direction()
         )
 
         events_logger = StrategyEventsLogger(symbol, timeframe, trading_direction)
@@ -173,13 +174,6 @@ class Adrastea(TradingStrategy):
             elif is_short:
                 notify_event(f"4️⃣ ✅ <b>Condition 4 matched</b>: Stochastic K ({stoch_k_cur}) crossed below D ({stoch_d_cur}) and D is above 50, confirming bearish momentum.")
 
-        elif self.cur_state == 3 and self.prev_state == 4:
-            if is_long:
-                notify_event(f"4️⃣ ❌ <b>Condition 4 regressed</b>: Stochastic K ({stoch_k_cur}) is no longer above D ({stoch_d_cur}).")
-            elif is_short:
-                notify_event(f"4️⃣ ❌ <b>Condition 4 regressed</b>: Stochastic K ({stoch_k_cur}) is no longer below D ({stoch_d_cur}).")
-
-        if self.should_enter:
             t_open = self.cur_condition_candle['time_open'].strftime('%H:%M')
             t_close = self.cur_condition_candle['time_close'].strftime('%H:%M')
 
@@ -190,6 +184,13 @@ class Adrastea(TradingStrategy):
 
             self.send_message_with_details(trading_opportunity_message, reply_markup=reply_markup)
 
+        elif self.cur_state == 3 and self.prev_state == 4:
+            if is_long:
+                notify_event(f"4️⃣ ❌ <b>Condition 4 regressed</b>: Stochastic K ({stoch_k_cur}) is no longer above D ({stoch_d_cur}).")
+            elif is_short:
+                notify_event(f"4️⃣ ❌ <b>Condition 4 regressed</b>: Stochastic K ({stoch_k_cur}) is no longer below D ({stoch_d_cur}).")
+
+        if self.should_enter:
             dir_str = "long" if is_long else "short"
             cur_candle_time = f"{cur_candle['time_open'].strftime('%H:%M')} - {cur_candle['time_close'].strftime('%H:%M')}"
             last_condition_candle_time = f"{self.cur_condition_candle['time_open'].strftime('%H:%M')} - {self.cur_condition_candle['time_close'].strftime('%H:%M')}"
@@ -200,7 +201,7 @@ class Adrastea(TradingStrategy):
     async def initialize(self):
         self.logger.info("Initializing the strategy.")
 
-        market_is_open = await execute_broker_call(self.config.get_bot_name(), self.broker.is_market_open, self.config.get_symbol())
+        market_is_open = await execute_broker_call(self.config.get_bot_name(), self.broker.is_market_open, self.trading_config.get_symbol())
         async with self.execution_lock:
             if not market_is_open:
                 self.logger.info("Market is closed, waiting for it to open.")
@@ -209,9 +210,9 @@ class Adrastea(TradingStrategy):
         self.logger.info("Market is open, proceeding with strategy bootstrap.")
 
         async with self.execution_lock:
-            timeframe = self.config.get_timeframe()
-            symbol = self.config.get_symbol()
-            trading_direction = self.config.get_trading_direction()
+            timeframe = self.trading_config.get_timeframe()
+            symbol = self.trading_config.get_symbol()
+            trading_direction = self.trading_config.get_trading_direction()
 
             self.logger.debug(f"Config - Symbol: {symbol}, Timeframe: {timeframe}, Direction: {trading_direction}")
 
@@ -224,8 +225,8 @@ class Adrastea(TradingStrategy):
                 candles = await execute_broker_call(
                     self.config.get_bot_name(),
                     self.broker.get_last_candles,
-                    self.config.get_symbol(),
-                    self.config.get_timeframe(),
+                    self.trading_config.get_symbol(),
+                    self.trading_config.get_timeframe(),
                     tot_candles_count
                 )
 
@@ -258,7 +259,7 @@ class Adrastea(TradingStrategy):
     @exception_handler
     async def on_market_status_change(self, is_open: bool, closing_time: float, opening_time: float, initializing: bool):
         async with self.execution_lock:
-            symbol = self.config.get_symbol()
+            symbol = self.trading_config.get_symbol()
             time_ref = opening_time if is_open else closing_time
             self.logger.info(f"Market for {symbol} has {'opened' if is_open else 'closed'} at {unix_to_datetime(time_ref)}.")
             if is_open:
@@ -282,7 +283,7 @@ class Adrastea(TradingStrategy):
 
         async with self.execution_lock:
 
-            market_is_open = await execute_broker_call(self.config.get_bot_name(), self.broker.is_market_open, self.config.get_symbol())
+            market_is_open = await execute_broker_call(self.config.get_bot_name(), self.broker.is_market_open, self.trading_config.get_symbol())
             if not market_is_open and not self.allow_last_tick:
                 self.logger.info("Market is closed, skipping tick processing.")
                 return
@@ -296,8 +297,8 @@ class Adrastea(TradingStrategy):
             candles = await execute_broker_call(
                 self.config.get_bot_name(),
                 self.broker.get_last_candles,
-                self.config.get_symbol(),
-                self.config.get_timeframe(),
+                self.trading_config.get_symbol(),
+                self.trading_config.get_timeframe(),
                 candles_count
             )
             await self.calculate_indicators(candles)
@@ -307,14 +308,14 @@ class Adrastea(TradingStrategy):
 
             self.logger.debug("Checking for trading signals.")
             self.should_enter, self.prev_state, self.cur_state, self.prev_condition_candle, self.cur_condition_candle = self.check_signals(
-                rates=candles, i=len(candles) - 1, trading_direction=self.config.get_trading_direction(),
+                rates=candles, i=len(candles) - 1, trading_direction=self.trading_config.get_trading_direction(),
                 state=self.cur_state, cur_condition_candle=self.cur_condition_candle
             )
 
             self.notify_state_change(candles, len(candles) - 1)
 
             if self.should_enter:
-                order_type_enter = OpType.BUY if self.config.get_trading_direction() == TradingDirection.LONG else OpType.SELL
+                order_type_enter = OpType.BUY if self.trading_config.get_trading_direction() == TradingDirection.LONG else OpType.SELL
                 self.logger.info(f"Placing order of type {order_type_enter.label} due to trading signal.")
 
                 if self.check_signal_confirmation_and_place_order(self.prev_condition_candle):
@@ -333,10 +334,10 @@ class Adrastea(TradingStrategy):
 
     @exception_handler
     async def prepare_order_to_place(self, cur_candle: Series) -> TradeOrder | None:
-        symbol = self.config.get_symbol()
-        trading_direction = self.config.get_trading_direction()
+        symbol = self.trading_config.get_symbol()
+        trading_direction = self.trading_config.get_trading_direction()
         order_type_enter = OpType.BUY if trading_direction == TradingDirection.LONG else OpType.SELL
-        timeframe = self.config.get_timeframe()
+        timeframe = self.trading_config.get_timeframe()
         magic_number = self.config.get_bot_magic_number()
 
         symbol_info = await execute_broker_call(
@@ -441,7 +442,7 @@ class Adrastea(TradingStrategy):
         return self.round_to_point(adjusted_price, symbol_point)
 
     def get_volume(self, account_balance, symbol_info, entry_price, stop_loss_price):
-        risk_percent = self.config.get_risk_percent()
+        risk_percent = self.trading_config.get_risk_percent()
         self.logger.info(
             f"Calculating volume for account balance {account_balance}, symbol info {symbol_info}, entry price {entry_price}, stop loss price {stop_loss_price}, and risk percent {risk_percent}")
         risk_amount = account_balance * risk_percent
@@ -550,7 +551,7 @@ class Adrastea(TradingStrategy):
 
             event_name = event_info.get('event_name', 'Unknown Event')
             minutes_until_event = int(event_info.get('seconds_until_event', 1) / 60)
-            symbol, magic_number = (self.config.get_symbol(), self.config.get_bot_magic_number())
+            symbol, magic_number = (self.trading_config.get_symbol(), self.config.get_bot_magic_number())
 
             message = (
                 f"📰🔔 Economic event <b>{event_name}</b> is scheduled to occur in {minutes_until_event} minutes.\n"
@@ -612,7 +613,7 @@ class Adrastea(TradingStrategy):
         symbol_info: SymbolInfo = await execute_broker_call(
             self.config.get_bot_name(),
             self.broker.get_market_info,
-            self.config.get_symbol()
+            self.trading_config.get_symbol()
         )
 
         # Calculate HA_close without rounding
@@ -826,10 +827,10 @@ class Adrastea(TradingStrategy):
             self.telegram.send_message(chat_id, message, reply_markup=reply_markup)
 
     def send_message_with_details(self, message, level=NotificationLevel.DEFAULT, reply_markup=None):
-        symbol, bot_name, timeframe, trading_direction = (self.config.get_symbol(),
+        symbol, bot_name, timeframe, trading_direction = (self.trading_config.get_symbol(),
                                                           self.config.get_bot_name(),
-                                                          self.config.get_timeframe(),
-                                                          self.config.get_trading_direction())
+                                                          self.trading_config.get_timeframe(),
+                                                          self.trading_config.get_trading_direction())
         direction_emoji = "📈" if trading_direction.name == "LONG" else "📉️"
         detailed_message = (
             f"{message}\n\n"
@@ -864,7 +865,7 @@ class Adrastea(TradingStrategy):
         open_dt_datetime = unix_to_datetime(int(open_dt))
         close_dt_datetime = unix_to_datetime(int(close_dt))
         now = now_utc()
-        if now > close_dt_datetime + timedelta(seconds=self.config.get_timeframe().to_seconds()):
+        if now > close_dt_datetime + timedelta(seconds=self.trading_config.get_timeframe().to_seconds()):
             self.logger.info(f"Signal from {open_dt_datetime} to {close_dt_datetime} is obsolete. Current time: {now}")
             await query.edit_message_text("⚠️ This signal is obsolete and can no longer be confirmed or ignored.")
             return

@@ -1,68 +1,101 @@
 import json
 import threading
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 
-from utils.enums import TradingDirection, Timeframe, NotificationLevel
+from utils.enums import TradingDirection, Timeframe, NotificationLevel, Mode
 from utils.utils_functions import string_to_enum
 
-required_structure = {
-    "enabled": bool,
-    "mt5": {
-        "timeout": int,
-        "account": int,
-        "password": str,
-        "server": str,
-        "mt5_path": str
-    },
-    "trading": {
-        "symbol": str,
-        "timeframe": str,
-        "trading_direction": str,
-        "risk_percent": float
-    },
-    "bot": {
-        "version": float,
-        "name": str,
-        "magic_number": int,
-        "symbols_db_sheet_id": str,
-        "logging_level": str
-    },
-    "telegram": {
-        "token": str,
-        "chat_ids": list,
-        "active": bool,
-        "notification_level": str
-    },
-    "mongo": {
-        "host": str,
-        "port": str,
-        "db_name": str
-    }
-}
+
+class TradingConfiguration:
+    """
+    Represents an individual trading configuration.
+    """
+    def __init__(self, symbol: str, timeframe: Timeframe, trading_direction: TradingDirection, risk_percent: float):
+        self.symbol = symbol
+        self.timeframe = timeframe
+        self.trading_direction = trading_direction
+        self.risk_percent = risk_percent
+
+    def __repr__(self):
+        return (f"TradingConfiguration(symbol={self.symbol}, timeframe={self.timeframe.name}, "
+                f"trading_direction={self.trading_direction.name}, risk_percent={self.risk_percent})")
+
+    # Accessors
+    def get_symbol(self) -> str:
+        return self.symbol
+
+    def get_timeframe(self) -> Timeframe:
+        return self.timeframe
+
+    def get_trading_direction(self) -> TradingDirection:
+        return self.trading_direction
+
+    def get_risk_percent(self) -> float:
+        return self.risk_percent
+
+    # Mutators
+    def set_symbol(self, symbol: str):
+        self.symbol = symbol
+
+    def set_timeframe(self, timeframe: Timeframe):
+        self.timeframe = timeframe
+
+    def set_trading_direction(self, trading_direction: TradingDirection):
+        self.trading_direction = trading_direction
+
+    def set_risk_percent(self, risk_percent: float):
+        self.risk_percent = risk_percent
 
 
 class ConfigReader:
     """
-    ConfigReader class implementing the Factory Pattern.
-    Manages configuration instances based on the bot name extracted from the configuration file.
-    Converts specific string values to corresponding Enum types for easier usage.
+    Reads and validates configuration settings, providing accessors for each property.
     """
-
-    # Class dictionary to store ConfigReader instances for each bot_name
     _configs: Dict[str, 'ConfigReader'] = {}
     _lock = threading.Lock()
 
-    def __init__(self, config_file_param: str):
-        """
-        Initializes an instance of ConfigReader.
+    # Expected JSON structure
+    required_structure = {
+        "enabled": bool,
+        "broker": {
+            "timeout": int,
+            "account": int,
+            "password": str,
+            "server": str,
+            "mt5_path": str,
+        },
+        "trading": {
+            "configurations": list,
+            "default_risk_percent": float,
+        },
+        "bot": {
+            "version": float,
+            "name": str,
+            "magic_number": int,
+            "symbols_db_sheet_id": str,
+            "logging_level": str,
+            "mode": str,
+        },
+        "telegram": {
+            "token": str,
+            "chat_ids": list,
+            "active": bool,
+            "notification_level": str,
+        },
+        "mongo": {
+            "host": str,
+            "port": str,
+            "db_name": str,
+        },
+    }
 
-        Parameters:
-        - config_file_param: Path to the JSON configuration file.
-        """
+    def __init__(self, config_file_param: str):
         self.config_file = config_file_param
         self.config = None
-        self.metatrader5_config = None
-        self.live_config = None
+        self.enabled = None
+        self.broker_config = None
+        self.trading_configs: List[TradingConfiguration] = []
+        self.default_risk_percent = None
         self.bot_config = None
         self.telegram_config = None
         self.mongo_config = None
@@ -72,83 +105,49 @@ class ConfigReader:
     @classmethod
     def load_config(cls, config_file_param: str) -> 'ConfigReader':
         """
-        Factory method to create and get a ConfigReader instance based on the bot name.
-        If the instance for the specified bot already exists, returns it.
-        Otherwise, creates a new instance, stores it, and returns it.
-
-        Parameters:
-        - config_file_param: Path to the JSON configuration file.
-
-        Returns:
-        - ConfigReader instance associated with the bot_name extracted from the configuration file.
+        Loads the configuration file and caches it based on the bot's name.
         """
-        # Attempt to extract bot_name from the configuration file
-        try:
-            with open(config_file_param, 'r') as f:
-                temp_config = json.load(f)
-            bot_name = temp_config.get('bot', {}).get('name')
-            if not bot_name:
-                raise ValueError(f"Field 'name' in section 'bot' is missing in file {config_file_param}.")
-        except FileNotFoundError:
-            raise FileNotFoundError(f"Configuration file {config_file_param} not found.")
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Error parsing JSON file {config_file_param}: {e}")
-
-        bot_key = bot_name.lower()
+        with open(config_file_param, 'r') as f:
+            temp_config = json.load(f)
+        bot_name = temp_config.get('bot', {}).get('name')
+        bot_key = bot_name.lower() if bot_name else None
 
         with cls._lock:
             if bot_key not in cls._configs:
                 cls._configs[bot_key] = cls(config_file_param)
             return cls._configs[bot_key]
 
-    @classmethod
-    def get_config(cls, bot_name: str) -> 'ConfigReader':
-        """
-        Gets the ConfigReader instance associated with the bot_name.
-
-        Parameters:
-        - bot_name: Bot name to identify the configuration.
-
-        Returns:
-        - ConfigReader instance associated with the bot_name.
-
-        Raises:
-        - KeyError if no instance exists for the bot_name.
-        """
-        bot_key = bot_name.lower()
-        if bot_key in cls._configs:
-            return cls._configs[bot_key]
-        else:
-            raise KeyError(f"No configuration found for bot '{bot_name}'.")
-
     def _initialize_config(self):
         """
-        Initializes various configuration sections and converts strings to Enums where needed.
+        Loads and validates the configuration file structure.
         """
-
         with open(self.config_file, 'r') as f:
             self.config = json.load(f)
 
         if not self.config:
             raise ValueError("Configuration not loaded.")
 
-        self.check_structure(self.config, required_structure)
+        # Validate structure
+        self._validate_structure(self.config, self.required_structure)
 
-        # Initialize MetaTrader5 configuration
-        self.metatrader5_config = self.config.get("mt5", {})
+        # Initialize each section
+        self.enabled = self.config.get("enabled", False)
+        self.broker_config = self.config.get("broker", {})
+        self.default_risk_percent = float(self.config.get("trading", {}).get("default_risk_percent", 0.01))
 
-        # Initialize Live configuration and convert specific fields to Enums
+        # Validate and initialize trading configurations
         trading_config = self.config.get("trading", {})
-        trading_config['timeframe'] = string_to_enum(Timeframe, trading_config.get('timeframe'))
-        trading_config['trading_direction'] = string_to_enum(TradingDirection, trading_config.get('trading_direction'))
-        trading_config['risk_percent'] = float(trading_config.get('risk_percent', 0.0))
-        self.live_config = trading_config
+        self.trading_configs = [
+            self._validate_configuration_item(item)
+            for item in trading_config.get("configurations", [])
+        ]
 
-        # Initialize Bot configuration
+        # Initialize bot configuration
         bot_config = self.config.get("bot", {})
+        bot_config['mode'] = string_to_enum(Mode, bot_config.get('mode').upper())
         self.bot_config = bot_config
 
-        # Initialize Telegram configuration and convert notification level to Enum
+        # Initialize Telegram configuration
         telegram_config = self.config.get("telegram", {})
         telegram_config['notification_level'] = string_to_enum(NotificationLevel, telegram_config.get('notification_level'))
         self.telegram_config = telegram_config
@@ -156,7 +155,10 @@ class ConfigReader:
         # Initialize MongoDB configuration
         self.mongo_config = self.config.get("mongo", {})
 
-    def check_structure(self, data: Dict[str, Any], structure: Dict[str, Any], path=""):
+    def _validate_structure(self, data: Dict[str, Any], structure: Dict[str, Any], path: str = ""):
+        """
+        Recursively validates the JSON structure against the required schema.
+        """
         for key, expected_type in structure.items():
             full_path = f"{path}.{key}" if path else key
             if key not in data:
@@ -164,98 +166,101 @@ class ConfigReader:
             if isinstance(expected_type, dict):
                 if not isinstance(data[key], dict):
                     raise TypeError(f"Key '{full_path}' should be a dictionary.")
-                self.check_structure(data[key], expected_type, full_path)
+                self._validate_structure(data[key], expected_type, full_path)
             elif not isinstance(data[key], expected_type):
                 raise TypeError(f"Key '{full_path}' should be of type {expected_type.__name__}.")
 
-    # Getter methods for each configuration section
+    def _validate_configuration_item(self, item: Dict[str, Any]) -> TradingConfiguration:
+        """
+        Validates and converts a configuration dictionary into a TradingConfiguration object.
+        """
+        required_keys = ["symbol", "timeframe", "trading_direction", "risk_percent"]
+        for key in required_keys:
+            if key not in item:
+                raise ValueError(f"Missing key '{key}' in a trading configuration item.")
 
-    def get_metatrader5_config(self):
-        self._ensure_config_loaded()
-        return self.metatrader5_config
+        return TradingConfiguration(
+            symbol=item["symbol"],
+            timeframe=string_to_enum(Timeframe, item["timeframe"]),
+            trading_direction=string_to_enum(TradingDirection, item["trading_direction"]),
+            risk_percent=float(item.get("risk_percent", self.default_risk_percent))
+        )
 
-    def get_live_config(self):
-        self._ensure_config_loaded()
-        return self.live_config
+    # Getters for individual sections and properties
 
-    def get_bot_config(self):
-        self._ensure_config_loaded()
-        return self.bot_config
+    def get_enabled(self) -> bool:
+        return self.enabled
 
-    def get_telegram_config(self):
-        self._ensure_config_loaded()
-        return self.telegram_config
+    # Broker Config
+    def get_broker_timeout(self) -> int:
+        return self.broker_config.get("timeout")
 
-    def get_mongo_config(self):
-        self._ensure_config_loaded()
-        return self.mongo_config
+    def get_broker_account(self) -> int:
+        return self.broker_config.get("account")
 
-    # Specific getter methods for each section
+    def get_broker_password(self) -> str:
+        return self.broker_config.get("password")
 
-    def get_mt5_timeout(self):
-        return self.get_metatrader5_config().get("timeout")
+    def get_broker_server(self) -> str:
+        return self.broker_config.get("server")
 
-    def get_mt5_account(self):
-        return self.get_metatrader5_config().get("account")
+    def get_broker_mt5_path(self) -> str:
+        return self.broker_config.get("mt5_path")
 
-    def get_mt5_password(self):
-        return self.get_metatrader5_config().get("password")
+    # Trading Config
+    def get_trading_configurations(self) -> List[TradingConfiguration]:
+        return self.trading_configs
 
-    def get_mt5_server(self):
-        return self.get_metatrader5_config().get("server")
+    def get_default_risk_percent(self) -> float:
+        return self.default_risk_percent
 
-    def get_mt5_path(self):
-        return self.get_metatrader5_config().get("mt5_path")
+    def get_trading_configuration_by_symbol(self, symbol: str) -> Optional[TradingConfiguration]:
+        for config in self.trading_configs:
+            if config.get_symbol() == symbol:
+                return config
+        return None
 
-    def get_symbol(self):
-        return self.get_live_config().get("symbol")
+    def get_trading_configuration_by_timeframe(self, timeframe: Timeframe) -> List[TradingConfiguration]:
+        return [config for config in self.trading_configs if config.get_timeframe() == timeframe]
 
-    def get_timeframe(self) -> Timeframe:
-        return self.get_live_config().get("timeframe")
+    # Bot Config
+    def get_bot_version(self) -> float:
+        return self.bot_config.get("version")
 
-    def get_trading_direction(self) -> TradingDirection:
-        return self.get_live_config().get("trading_direction")
+    def get_bot_name(self) -> str:
+        return self.bot_config.get("name")
 
-    def get_risk_percent(self) -> float:
-        return self.get_live_config().get("risk_percent")
+    def get_bot_magic_number(self) -> int:
+        return self.bot_config.get("magic_number")
 
-    def get_bot_version(self):
-        return self.get_bot_config().get("version")
+    def get_bot_symbols_db_sheet_id(self) -> str:
+        return self.bot_config.get("symbols_db_sheet_id")
 
-    def get_bot_name(self):
-        return self.get_bot_config().get("name")
+    def get_bot_logging_level(self) -> str:
+        return self.bot_config.get("logging_level")
 
-    def get_bot_magic_number(self):
-        return self.get_bot_config().get("magic_number")
+    def get_bot_mode(self) -> Mode:
+        return self.bot_config.get("mode")
 
-    def get_bot_logging_level(self):
-        return self.get_bot_config().get("logging_level")
+    # Telegram Config
+    def get_telegram_token(self) -> str:
+        return self.telegram_config.get("token")
 
-    def get_bot_symbols_db_sheet_id(self):
-        return self.get_bot_config().get("symbols_db_sheet_id")
+    def get_telegram_chat_ids(self) -> List[str]:
+        return self.telegram_config.get("chat_ids")
 
-    def get_telegram_token(self):
-        return self.get_telegram_config().get("token")
-
-    def get_telegram_chat_ids(self):
-        return self.get_telegram_config().get("chat_ids")
-
-    def get_telegram_active(self):
-        return self.get_telegram_config().get("active")
+    def get_telegram_active(self) -> bool:
+        return self.telegram_config.get("active")
 
     def get_telegram_notification_level(self) -> NotificationLevel:
-        return self.get_telegram_config().get("notification_level")
+        return self.telegram_config.get("notification_level")
 
-    def get_mongo_host(self):
-        return self.get_mongo_config().get("host")
+    # Mongo Config
+    def get_mongo_host(self) -> str:
+        return self.mongo_config.get("host")
 
-    def get_mongo_port(self) -> int:
-        return int(self.get_mongo_config().get("port"))
+    def get_mongo_port(self) -> str:
+        return self.mongo_config.get("port")
 
     def get_mongo_db_name(self) -> str:
-        return self.get_mongo_config().get("db_name")
-
-    # Private method to ensure the configuration is loaded
-    def _ensure_config_loaded(self):
-        if self.config is None:
-            raise ValueError("Configuration not loaded. Call load_config(filepath) first.")
+        return self.mongo_config.get("db_name")
