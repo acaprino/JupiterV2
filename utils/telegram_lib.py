@@ -2,59 +2,68 @@ import asyncio
 import threading
 from queue import Queue
 from telegram.constants import ParseMode
-from telegram.ext import Application, CallbackQueryHandler
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 
 from utils.bot_logger import BotLogger
 from utils.error_handler import exception_handler
 
 
 class TelegramBotWrapper:
-    _instance = None  # Class attribute to store the singleton instance
+    _instances = {}
+    _lock = threading.Lock()
 
-    def __new__(cls, *args, **kwargs):
-        # Implement singleton pattern
-        if cls._instance is None:
-            cls._instance = super(TelegramBotWrapper, cls).__new__(cls)
-        return cls._instance
+    def __new__(cls, token, bot_name, *args, **kwargs):
+        with cls._lock:
+            if token not in cls._instances:
+                cls._instances[token] = super(TelegramBotWrapper, cls).__new__(cls)
+        return cls._instances[token]
 
     def __init__(self, token, bot_name):
         if hasattr(self, '_initialized') and self._initialized:
-            return  # Prevent reinitialization
+            return
         self.token = token
+        self.bot_name = bot_name
         self.application = None
-        self.bot_thread = None
         self.loop = None
         self.ready_event = threading.Event()
         self.logger = BotLogger.get_logger(bot_name)
         self.message_queue = Queue()
-        self._initialized = True  # Mark instance as initialized
+        self._thread_lock = threading.Lock()
+        self._is_running = False
+        self.bot_thread = None
+        self._initialized = True
 
     def start(self):
-        self.bot_thread = threading.Thread(target=self._run_bot)
+        if self._is_running:
+            self.logger.warning(f"Bot {self.bot_name} is already running.")
+            return
+
+        self._is_running = True
+        self.bot_thread = threading.Thread(target=self._run_bot, daemon=True)
         self.bot_thread.start()
-        self.ready_event.wait()
 
     def _run_bot(self):
         try:
-            self.loop = asyncio.get_event_loop()
-        except RuntimeError:  # No loop found
             self.loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.loop)
 
-        self.application = Application.builder().token(self.token).build()
+            self.application = Application.builder().token(self.token).build()
+            self.loop.run_until_complete(self.application.initialize())
 
-        # Initialize and signal that the bot is ready
-        self.loop.run_until_complete(self.application.initialize())
-        self.ready_event.set()
+            self.ready_event.set()
 
-        # Start the message processing task
-        asyncio.run_coroutine_threadsafe(self._process_queue(), self.loop)
+            self.loop.run_until_complete(self.application.run_polling())
+        except Exception as e:
+            self.logger.error(f"Error in bot thread: {e}")
+        finally:
+            self._is_running = False
 
-        # Start polling and keep the bot running
-        self.loop.run_until_complete(self.application.run_polling())
+    def send_message(self, chat_id, text, reply_markup=None):
+        with self._thread_lock:
+            if self.ready_event.is_set():
+                self.message_queue.put((chat_id, text, reply_markup))
 
     async def _process_queue(self):
-        """Process the message queue to send messages in order."""
         while True:
             chat_id, text, reply_markup = self.message_queue.get()
             try:
@@ -63,21 +72,35 @@ class TelegramBotWrapper:
                 self.logger.error(f"Failed to send message: {e}")
             self.message_queue.task_done()
 
-    def send_message(self, chat_id, text, reply_markup=None):
-        # Ensure the bot is fully initialized before queuing a message
-        if self.ready_event.is_set():
-            self.message_queue.put((chat_id, text, reply_markup))
-
     @exception_handler
     async def _send_message(self, chat_id, text, reply_markup=None):
-        await self.application.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+        await self.application.bot.send_message(
+            chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML
+        )
 
     def stop(self):
+        if not self._is_running:
+            self.logger.warning(f"Bot {self.bot_name} is not running.")
+            return
+
+        if self.application:
+            self.loop.call_soon_threadsafe(self.application.shutdown)
         if self.loop:
             self.loop.call_soon_threadsafe(self.loop.stop)
-        if self.bot_thread:
+
+        if self.bot_thread and self.bot_thread.is_alive():
             self.bot_thread.join()
 
-    def add_command_callback_handler(self, handler):
+        self._is_running = False
+
+    def add_command_callback_handler(self, command: str, handler):
         if self.application:
-            self.application.add_handler(CallbackQueryHandler(handler))
+            self.application.add_handler(CommandHandler(command, handler))
+        else:
+            self.logger.error("Application not initialized. Cannot add command handler.")
+
+    def add_callback_query_handler(self, handler, pattern: str = None):
+        if self.application:
+            self.application.add_handler(CallbackQueryHandler(handler, pattern=pattern))
+        else:
+            self.logger.error("Application not initialized. Cannot add callback query handler.")

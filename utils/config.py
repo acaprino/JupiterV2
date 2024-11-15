@@ -6,19 +6,46 @@ from utils.enums import TradingDirection, Timeframe, NotificationLevel, Mode
 from utils.utils_functions import string_to_enum
 
 
+class TelegramConfiguration:
+    """
+    Represents a Telegram configuration for a trading configuration.
+    """
+
+    def __init__(self, token: str, chat_ids: List[str]):
+        self.token = token
+        self.chat_ids = chat_ids
+
+    # Accessors
+    def get_token(self) -> str:
+        return self.token
+
+    def get_chat_ids(self) -> List[str]:
+        return self.chat_ids
+
+    # Mutators
+    def set_token(self, token: str):
+        self.token = token
+
+    def set_chat_ids(self, chat_ids: List[str]):
+        self.chat_ids = chat_ids
+
+
 class TradingConfiguration:
     """
     Represents an individual trading configuration.
     """
-    def __init__(self, symbol: str, timeframe: Timeframe, trading_direction: TradingDirection, risk_percent: float):
+
+    def __init__(self, symbol: str, timeframe: Timeframe, trading_direction: TradingDirection, risk_percent: float, telegram_config: TelegramConfiguration):
         self.symbol = symbol
         self.timeframe = timeframe
         self.trading_direction = trading_direction
         self.risk_percent = risk_percent
+        self.telegram_config = telegram_config
 
     def __repr__(self):
         return (f"TradingConfiguration(symbol={self.symbol}, timeframe={self.timeframe.name}, "
-                f"trading_direction={self.trading_direction.name}, risk_percent={self.risk_percent})")
+                f"trading_direction={self.trading_direction.name}, risk_percent={self.risk_percent}, "
+                f"telegram_config={self.telegram_config})")
 
     # Accessors
     def get_symbol(self) -> str:
@@ -33,6 +60,9 @@ class TradingConfiguration:
     def get_risk_percent(self) -> float:
         return self.risk_percent
 
+    def get_telegram_config(self) -> TelegramConfiguration:
+        return self.telegram_config
+
     # Mutators
     def set_symbol(self, symbol: str):
         self.symbol = symbol
@@ -45,6 +75,9 @@ class TradingConfiguration:
 
     def set_risk_percent(self, risk_percent: float):
         self.risk_percent = risk_percent
+
+    def set_telegram_config(self, telegram_config: TelegramConfiguration):
+        self.telegram_config = telegram_config
 
 
 class ConfigReader:
@@ -75,12 +108,6 @@ class ConfigReader:
             "symbols_db_sheet_id": str,
             "logging_level": str,
             "mode": str,
-        },
-        "telegram": {
-            "token": str,
-            "chat_ids": list,
-            "active": bool,
-            "notification_level": str,
         },
         "mongo": {
             "host": str,
@@ -147,11 +174,6 @@ class ConfigReader:
         bot_config['mode'] = string_to_enum(Mode, bot_config.get('mode').upper())
         self.bot_config = bot_config
 
-        # Initialize Telegram configuration
-        telegram_config = self.config.get("telegram", {})
-        telegram_config['notification_level'] = string_to_enum(NotificationLevel, telegram_config.get('notification_level'))
-        self.telegram_config = telegram_config
-
         # Initialize MongoDB configuration
         self.mongo_config = self.config.get("mongo", {})
 
@@ -174,16 +196,27 @@ class ConfigReader:
         """
         Validates and converts a configuration dictionary into a TradingConfiguration object.
         """
-        required_keys = ["symbol", "timeframe", "trading_direction", "risk_percent"]
+        required_keys = ["symbol", "timeframe", "trading_direction", "risk_percent", "telegram"]
         for key in required_keys:
             if key not in item:
                 raise ValueError(f"Missing key '{key}' in a trading configuration item.")
+
+        # Create TelegramConfiguration object
+        telegram_config = item["telegram"]
+        if not isinstance(telegram_config, dict):
+            raise TypeError(f"'telegram' in trading configuration must be a dictionary.")
+
+        telegram_configuration = TelegramConfiguration(
+            token=telegram_config["token"],
+            chat_ids=telegram_config["chat_ids"]
+        )
 
         return TradingConfiguration(
             symbol=item["symbol"],
             timeframe=string_to_enum(Timeframe, item["timeframe"]),
             trading_direction=string_to_enum(TradingDirection, item["trading_direction"]),
-            risk_percent=float(item.get("risk_percent", self.default_risk_percent))
+            risk_percent=float(item.get("risk_percent", self.default_risk_percent)),
+            telegram_config=telegram_configuration
         )
 
     # Getters for individual sections and properties
@@ -241,19 +274,6 @@ class ConfigReader:
 
     def get_bot_mode(self) -> Mode:
         return self.bot_config.get("mode")
-
-    # Telegram Config
-    def get_telegram_token(self) -> str:
-        return self.telegram_config.get("token")
-
-    def get_telegram_chat_ids(self) -> List[str]:
-        return self.telegram_config.get("chat_ids")
-
-    def get_telegram_active(self) -> bool:
-        return self.telegram_config.get("active")
-
-    def get_telegram_notification_level(self) -> NotificationLevel:
-        return self.telegram_config.get("notification_level")
 
     # Mongo Config
     def get_mongo_host(self) -> str:

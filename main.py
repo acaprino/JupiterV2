@@ -112,5 +112,14 @@ if __name__ == "__main__":
 
     trading_configs = config.get_trading_configurations()
 
-    for trading_config in trading_configs:
-        loop.run_until_complete(main(config, trading_config))
+    async def run_all_tasks():
+        tasks = [
+            main(config, trading_config) for trading_config in trading_configs
+        ]
+        await asyncio.gather(*tasks)
+
+    # Run all tasks asynchronously
+    try:
+        loop.run_until_complete(run_all_tasks())
+    finally:
+        loop.close()

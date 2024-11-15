@@ -70,6 +70,7 @@ class Adrastea(TradingStrategy):
     def __init__(self, bot_name: str, broker: BrokerAPI, config: ConfigReader, trading_config: TradingConfiguration, execution_lock: asyncio.Lock):
         self.broker = broker
         self.config = config
+        self.bot_name = bot_name
         self.trading_config = trading_config
         self.logger = BotLogger.get_logger(bot_name)
         self.execution_lock = execution_lock
@@ -81,7 +82,7 @@ class Adrastea(TradingStrategy):
         self.cur_state = None
         self.should_enter = False
         self.heikin_ashi_candles_buffer = int(1000 * trading_config.get_timeframe().to_hours())
-        self.telegram = TelegramBotWrapper(token=config.get_telegram_token(), bot_name=bot_name)
+        self.telegram = TelegramBotWrapper(token=trading_config.get_telegram_config().get_token(), bot_name=bot_name)
         self.allow_last_tick = False
         self.market_open_event = asyncio.Event()
         self.bootstrap_completed_event = asyncio.Event()
@@ -818,16 +819,11 @@ class Adrastea(TradingStrategy):
         return prev_state, ret_state, prev_condition_candle, updated_candle
 
     def send_message(self, message, level=NotificationLevel.DEFAULT, reply_markup=None):
-        if not self.config.get_telegram_active():
-            return
-
         # Check if the notification level is high enough to send
-        send_notification = level.value >= self.config.get_telegram_notification_level().value
-        if not send_notification:
-            return
 
-        t_chat_ids = self.config.get_telegram_chat_ids()
+        t_chat_ids = self.trading_config.get_telegram_config().get_chat_ids()
         for chat_id in t_chat_ids:
+            print(f"Sending message {message} to chat_id: {chat_id} and bot_name: {self.bot_name}")
             self.telegram.send_message(chat_id, message, reply_markup=reply_markup)
 
     def send_message_with_details(self, message, level=NotificationLevel.DEFAULT, reply_markup=None):
